@@ -503,6 +503,7 @@
   let currentTasksPages = 1;
   let currentTasksData = [];
   const CURRENT_PAGE_SIZE = 12;
+  let confirmResolver = null;
   let historyPage = 1;
   let historyPages = 1;
   let historySearchTimer = 0;
@@ -765,9 +766,40 @@
   function closeModal() {
     modal.hidden = true;
     modalCard.classList.remove("task-modal");
+    if (confirmResolver) {
+      const resolve = confirmResolver;
+      confirmResolver = null;
+      resolve(false);
+    }
     modalBody.replaceChildren();
     state.selected = null;
     revokeUploadPreview();
+  }
+
+  function confirmAction(message) {
+    return new Promise(resolve => {
+      const body = make("div", "confirm-body");
+      body.append(make("p", "", message));
+      const actions = make("div", "task-actions confirm-actions");
+      const cancel = make("button", "maibot-button", "取消");
+      const confirm = make("button", "maibot-button maibot-button-primary", "确认");
+      cancel.type = "button";
+      confirm.type = "button";
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        confirmResolver = null;
+        closeModal();
+        resolve(value);
+      };
+      cancel.addEventListener("click", () => finish(false));
+      confirm.addEventListener("click", () => finish(true));
+      actions.append(cancel, confirm);
+      body.append(actions);
+      confirmResolver = finish;
+      openModal("确认操作", body);
+    });
   }
 
   async function openDetail(name) {
@@ -1815,7 +1847,7 @@
   }
 
   async function cancelTask(taskId) {
-    if (!window.confirm(`确认取消排队中的任务 #${taskId}？`)) return;
+    if (!await confirmAction(`确认取消排队中的任务 #${taskId}？`)) return;
     try {
       const result = await request("action", "cancel_task", {task_id: taskId});
       if (result.error) throw new Error(result.error);
@@ -1839,7 +1871,7 @@
   }
 
   async function deleteTask(taskId) {
-    if (!window.confirm(`确认删除任务 #${taskId} 及其文件？`)) return;
+    if (!await confirmAction(`确认删除任务 #${taskId} 及其文件？`)) return;
     try {
       const result = await request("action", "delete_tasks", {ids_json: JSON.stringify([taskId])});
       if (result.error) throw new Error(result.error);
@@ -1856,7 +1888,7 @@
       setTaskStatus("#history-status", "先勾选要删除的历史任务", true);
       return;
     }
-    if (!window.confirm(`确认删除 ${ids.length} 个历史任务及其文件？`)) return;
+    if (!await confirmAction(`确认删除 ${ids.length} 个历史任务及其文件？`)) return;
     try {
       const result = await request("action", "delete_tasks", {ids_json: JSON.stringify(ids)});
       if (result.error) throw new Error(result.error);
