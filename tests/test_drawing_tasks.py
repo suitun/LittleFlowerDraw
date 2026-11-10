@@ -70,6 +70,26 @@ class DrawingTaskStoreTests(unittest.TestCase):
             self.store.cancel(record.id)
         return record
 
+    def test_free_task_can_have_no_reference_image(self) -> None:
+        record = self.store.create_task(
+            command_id="自由绘画",
+            kind="free",
+            requester_id="user-free",
+            group_id="",
+            account_id="account-a",
+            scope="",
+            source_message_id="message-free",
+            source_key="message-free",
+            role_names=[],
+            extra_prompt="",
+            final_prompt="发挥创意",
+            reference_image=b"",
+            api_model="gpt-image-2",
+            api_size="auto",
+        )
+        self.assertEqual(record.reference_path, "")
+        self.assertEqual(self.store.get(record.id).reference_path, "")
+
     def test_requester_names_persist_across_reopen(self) -> None:
         record = self.store.create_task(
             command_id="绘图",

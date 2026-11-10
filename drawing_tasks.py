@@ -277,8 +277,8 @@ class DrawingTaskStore:
             raise ValueError("指令、发起人和账号不能为空")
         if not source_key:
             raise ValueError("来源消息标识不能为空")
-        if not isinstance(reference_image, bytes) or not reference_image:
-            raise ValueError("绘图任务需要非空的参考图数据")
+        if not isinstance(reference_image, bytes):
+            raise ValueError("参考图数据必须是字节")
 
         now = int(time.time())
         role_names_json = json.dumps(list(role_names), ensure_ascii=False)
@@ -308,9 +308,11 @@ class DrawingTaskStore:
 
                 task_id = self._allocate_id(connection)
                 task_dir = self._task_dir(task_id)
-                task_dir.mkdir(parents=True, exist_ok=True)
-                reference_path = task_dir / "reference.png"
-                reference_path.write_bytes(reference_image)
+                reference_path = ""
+                if reference_image:
+                    task_dir.mkdir(parents=True, exist_ok=True)
+                    reference_path = task_dir / "reference.png"
+                    reference_path.write_bytes(reference_image)
                 connection.execute(
                     _INSERT_TASK_SQL,
                     (

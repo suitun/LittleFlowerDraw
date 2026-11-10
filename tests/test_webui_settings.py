@@ -30,7 +30,7 @@ class WebUISettingsTests(unittest.TestCase):
 
         self.assertEqual(
             [policy.command for policy in settings.commands.policies],
-            ["登记角色", "查看角色", "角色列表", "帮助", "单角色替换", "双角色替换", "多人替换"],
+            ["登记角色", "查看角色", "角色列表", "帮助", "自由绘画", "单角色替换", "双角色替换", "多人替换"],
         )
         self.assertEqual(settings.access.admin_qq, "2685275264")
         self.assertFalse(settings.access.whitelist_enabled)
@@ -41,7 +41,7 @@ class WebUISettingsTests(unittest.TestCase):
         config = webui_settings.CommandPolicyConfig(
             policies=[{"command": "登记角色", "permission": "仅管理员", "limit": 2, "reset_days": 2}]
         )
-        self.assertEqual(len(config.policies), 7)
+        self.assertEqual(len(config.policies), 8)
         register = next(policy for policy in config.policies if policy.command == "登记角色")
         self.assertEqual((register.permission, register.limit, register.reset_days), ("仅管理员", 2, 2))
 

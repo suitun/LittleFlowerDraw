@@ -1,4 +1,4 @@
-"""绘图关键词模板：单角色替换、双角色替换和多人替换的匹配。"""
+"""绘图关键词模板：自由绘画、单角色替换、双角色替换和多人替换的匹配。"""
 
 from dataclasses import dataclass
 from typing import List, Optional, Set, Tuple
@@ -8,6 +8,7 @@ import re
 from .trigger_syntax import normalize_template_key, split_mention_requirement
 
 
+PROMPT_FIELD = "{提示词}"
 EXTRA_FIELD = "{额外提示词}"
 ROLE_FIELD = "{角色名}"
 ROLE_ONE_FIELD = "{角色名1}"
@@ -15,6 +16,7 @@ ROLE_TWO_FIELD = "{角色名2}"
 ROLE_LIST_FIELD = "{角色名列表}"
 
 DRAWING_KIND_LABELS = {
+    "free": "自由绘画",
     "replace": "单角色替换",
     "together": "双角色替换",
     "group": "多人替换",
@@ -31,6 +33,7 @@ class DrawingCandidate:
     role_names: List[str]
     roles_text: str
     extra_prompt: str
+    free_prompt: str = ""
 
 
 def _validate_placeholders(template: str, allowed: Set[str]) -> None:
@@ -66,6 +69,15 @@ def _optional_extra(has_extra: bool) -> str:
 
 def _compile(template: str, kind: str) -> re.Pattern[str]:
     _, template = split_mention_requirement(template)
+    if kind == "free":
+        _validate_placeholders(template, {"提示词"})
+        if template.count(PROMPT_FIELD) != 1:
+            raise ValueError("自由绘画模板必须且只能包含一个 {提示词}")
+        prefix, suffix = template.split(PROMPT_FIELD)
+        return re.compile(
+            r"\A" + _literal(prefix) + r"(?P<prompt>.*?)" + _literal(suffix) + r"\Z",
+            re.DOTALL,
+        )
     if kind == "replace":
         _validate_placeholders(template, {"角色名", "额外提示词"})
         if template.count(ROLE_FIELD) != 1:
@@ -107,6 +119,10 @@ def validate_templates(templates: List[str], kind: str) -> None:
 
 def _candidate(match: re.Match[str], kind: str) -> DrawingCandidate:
     extra = (match.groupdict().get("extra") or "").strip()
+    if kind == "free":
+        return DrawingCandidate(
+            "free", [], "", "", free_prompt=match.group("prompt").strip()
+        )
     if kind == "replace":
         return DrawingCandidate(kind, [match.group("role").strip()], "", extra)
     roles_text = match.group("roles").strip()
@@ -121,6 +137,7 @@ def match_drawing_request(
     replace_templates: List[str],
     together_templates: List[str],
     group_templates: List[str],
+    free_templates: Optional[List[str]] = None,
     *,
     mentioned_bot: bool = False,
 ) -> Optional[DrawingCandidate]:
@@ -134,6 +151,9 @@ def match_drawing_request(
     ] + [
         (len(normalize_template_key(template)), "group", template)
         for template in group_templates
+    ] + [
+        (len(normalize_template_key(template)), "free", template)
+        for template in (free_templates or [])
     ]
     rules.sort(key=lambda item: item[0], reverse=True)
     normalized = text.strip()

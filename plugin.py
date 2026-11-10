@@ -243,6 +243,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 settings.drawing.replace_templates,
                 settings.drawing.together_templates,
                 settings.drawing.group_templates,
+                settings.drawing.free_templates,
                 mentioned_bot=mentioned_bot,
             )
         if request is None and drawing is None:
@@ -544,19 +545,26 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 )
                 return False
 
-        role_names = await self._drawing_role_names(candidate, settings, stream_id, user_id)
-        if role_names is None:
-            return False
+        is_free = candidate.kind == "free"
+        if is_free:
+            role_names = []
+            prompt = candidate.free_prompt.strip() or settings.drawing.fallback_prompt.strip() or "发挥创意"
+        else:
+            role_names = await self._drawing_role_names(candidate, settings, stream_id, user_id)
+            if role_names is None:
+                return False
         limits = ImageLimits(
             max_image_bytes=settings.library.max_image_mb * 1024**2,
         )
+        reference = b""
         try:
             reference = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
         except MissingImageError:
-            await self._send_keyed_text(
-                settings.drawing, "missing_reference_reply", render_reply(settings.drawing.missing_reference_reply, ""), stream_id, user_id
-            )
-            return False
+            if not is_free:
+                await self._send_keyed_text(
+                    settings.drawing, "missing_reference_reply", render_reply(settings.drawing.missing_reference_reply, ""), stream_id, user_id
+                )
+                return False
         except ImageInputError as error:
             self.ctx.logger.warning("小花绘绘图参考图未通过校验", exc_info=True)
             await self._send_keyed_text(
@@ -574,14 +582,15 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 settings.drawing, "api_missing_reply", render_reply(settings.drawing.api_missing_reply, ""), stream_id, user_id
             )
             return False
-        base_prompt = {
-            "replace": settings.drawing.replace_prompt,
-            "together": settings.drawing.together_prompt,
-            "group": settings.drawing.group_prompt,
-        }[candidate.kind]
-        prompt = base_prompt.strip()
-        if candidate.extra_prompt:
-            prompt = f"{prompt}\n{candidate.extra_prompt}"
+        if not is_free:
+            base_prompt = {
+                "replace": settings.drawing.replace_prompt,
+                "together": settings.drawing.together_prompt,
+                "group": settings.drawing.group_prompt,
+            }[candidate.kind]
+            prompt = base_prompt.strip()
+            if candidate.extra_prompt:
+                prompt = f"{prompt}\n{candidate.extra_prompt}"
         message_id = str(job.message.get("message_id") or "")
         account_id = str(job.message.get("account_id") or "")
         scope = str(job.message.get("scope") or "")
@@ -765,7 +774,11 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         stream_id = await self._open_chat(message)
         await asyncio.to_thread(task_store.set_stage, task.id, "preparing")
         try:
-            reference = await asyncio.to_thread(Path(task.reference_path).read_bytes)
+            reference = (
+                await asyncio.to_thread(Path(task.reference_path).read_bytes)
+                if task.reference_path
+                else b""
+            )
         except OSError as error:
             raise DrawingApiError("任务参考图已丢失") from error
         role_images: List[bytes] = []
@@ -779,12 +792,17 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             raise DrawingApiError("绘图 API 尚未配置")
         run_config = api.model_copy(update={"model": task.api_model, "size": task.api_size})
         await asyncio.to_thread(task_store.set_stage, task.id, "calling_api")
-        result = await asyncio.to_thread(
-            OpenAIImageClient().generate,
-            run_config,
-            task.final_prompt,
-            [reference, *role_images],
-        )
+        if task.kind == "free" and not reference:
+            result = await asyncio.to_thread(
+                OpenAIImageClient().generate_text, run_config, task.final_prompt
+            )
+        else:
+            result = await asyncio.to_thread(
+                OpenAIImageClient().generate,
+                run_config,
+                task.final_prompt,
+                [reference, *role_images],
+            )
         await asyncio.to_thread(task_store.set_stage, task.id, "saving")
         path = await asyncio.to_thread(self._save_drawing_image, result.image, task.kind)
         await asyncio.to_thread(task_store.succeed, task.id, str(path))
@@ -910,6 +928,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                         ("单角色替换", settings.drawing.replace_templates),
                         ("双角色替换", settings.drawing.together_templates),
                         ("多人替换", settings.drawing.group_templates),
+                        ("自由绘画", settings.drawing.free_templates),
                     ),
                 ),
                 ("帮助", (("帮助", settings.keywords.help_templates),)),
@@ -1236,10 +1255,12 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         denied = await asyncio.to_thread(guard.check_quota, old.command_id, old.requester_id)
         if denied:
             return {"retried": False, "error": denied}
-        try:
-            reference = await asyncio.to_thread(Path(old.reference_path).read_bytes)
-        except OSError:
-            return {"retried": False, "error": "原任务参考图已丢失"}
+        reference = b""
+        if old.reference_path:
+            try:
+                reference = await asyncio.to_thread(Path(old.reference_path).read_bytes)
+            except OSError:
+                return {"retried": False, "error": "原任务参考图已丢失"}
         settings = await asyncio.to_thread(self._require_settings_store().current)
         try:
             async with self._task_submit_lock:

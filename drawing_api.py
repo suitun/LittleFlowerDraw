@@ -91,6 +91,15 @@ class DrawingApiConfig(PluginConfigBase):
             return value + "/images/edits"
         return value + "/v1/images/edits"
 
+    @property
+    def generation_endpoint(self) -> str:
+        value = self.base_url.rstrip("/")
+        if value.endswith("/images/edits"):
+            value = value[: -len("/images/edits")]
+        if value.endswith("/v1"):
+            return value + "/images/generations"
+        return value + "/v1/images/generations"
+
 
 class DrawingApiStore:
     """API 配置独立保存，避免和普通插件设置一起被覆盖。"""
@@ -362,6 +371,56 @@ class OpenAIImageClient:
             raise DrawingApiError(f"绘图 API 没有返回图片: {message or str(payload)[:500]}")
         item = items[0]
         image_bytes = self._decode_item(item, config, request.full_url)
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as image:
+                image.verify()
+        except (UnidentifiedImageError, OSError) as error:
+            raise DrawingApiError("绘图 API 返回的图片无法识别") from error
+        return DrawingResult(image=image_bytes, prompt=prompt)
+
+    def generate_text(self, config: DrawingApiConfig, prompt: str) -> DrawingResult:
+        """没有参考图时走 /v1/images/generations 的纯文生图。"""
+        if not config.configured:
+            raise DrawingApiError("绘图 API 尚未配置")
+        payload = {
+            "model": config.model,
+            "prompt": prompt,
+            "size": "auto" if config.size == "reference" else config.size,
+            "n": 1,
+        }
+        endpoint = config.generation_endpoint
+        request = Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {config.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "LittleFlowerDraw/0.6",
+            },
+        )
+        try:
+            with urlopen(request, timeout=config.timeout_seconds) as response:
+                raw = response.read()
+        except HTTPError as error:
+            detail = error.read(1200).decode("utf-8", "replace")
+            if error.code == 400:
+                error.close()
+                raise DrawingApiError("自由绘画提示词不符合接口要求") from error
+            raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}", status_code=error.code) from error
+        except (URLError, TimeoutError, OSError) as error:
+            raise DrawingApiError(f"绘图 API 请求失败: {error}") from error
+
+        try:
+            payload_data: Any = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise DrawingApiError("绘图 API 返回的不是有效 JSON") from error
+        items = payload_data.get("data") if isinstance(payload_data, dict) else None
+        if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+            message = payload_data.get("error") if isinstance(payload_data, dict) else None
+            raise DrawingApiError(f"绘图 API 没有返回图片: {message or str(payload_data)[:500]}")
+        image_bytes = self._decode_item(items[0], config, endpoint)
         try:
             with Image.open(io.BytesIO(image_bytes)) as image:
                 image.verify()

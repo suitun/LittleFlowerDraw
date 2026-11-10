@@ -74,6 +74,14 @@ class DrawingPatternTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     drawing_patterns.validate_templates(templates, kind)
 
+    def test_free_drawing_captures_prompt_and_allows_empty(self) -> None:
+        result = match_drawing_request("小花画 星空", [], [], [], ["小花画{提示词}"])
+        self.assertIsNotNone(result)
+        self.assertEqual((result.kind, result.free_prompt), ("free", "星空"))
+        empty = match_drawing_request("小花画", [], [], [], ["小花画{提示词}"])
+        self.assertIsNotNone(empty)
+        self.assertEqual(empty.free_prompt, "")
+
     def test_optional_at_prefix_requires_a_bot_mention(self) -> None:
         templates = ["@变{角色名} {额外提示词}"]
         self.assertIsNone(match_drawing_request("变角色A 外套", templates, [], []))

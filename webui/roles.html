@@ -264,8 +264,11 @@
           <label class="settings-field">多人替换模板（每行一条）
             <textarea id="setting-drawing-group-templates" class="maibot-input" rows="3" placeholder="多人穿{角色名列表} {额外提示词}"></textarea>
           </label>
+          <label class="settings-field">自由绘画模板（每行一条）
+            <textarea id="setting-drawing-free-templates" class="maibot-input" rows="3" placeholder="小花画{提示词}"></textarea>
+          </label>
         </div>
-        <p class="muted">多人替换用 @ 分隔角色，例如 <code>多人穿@角色1@角色2@角色3 换装</code>；{额外提示词} 可省略。模板开头加 <code>@</code> 表示必须先 @ 机器人，例如 <code>@变{角色名} {额外提示词}</code>。</p>
+        <p class="muted">多人替换用 @ 分隔角色，例如 <code>多人穿@角色1@角色2@角色3 换装</code>；自由绘画不依赖角色库，可以不带参考图。模板开头加 <code>@</code> 表示必须先 @ 机器人，例如 <code>@变{角色名} {额外提示词}</code>。</p>
         <div class="settings-grid">
           <label class="settings-field">单角色基础提示词
             <textarea id="setting-drawing-replace-prompt" class="maibot-input" rows="3"></textarea>
@@ -275,6 +278,9 @@
           </label>
           <label class="settings-field">多人基础提示词
             <textarea id="setting-drawing-group-prompt" class="maibot-input" rows="3"></textarea>
+          </label>
+          <label class="settings-field">自由绘画兜底提示词
+            <textarea id="setting-drawing-fallback-prompt" class="maibot-input" rows="3" placeholder="发挥创意"></textarea>
           </label>
         </div>
         <p class="muted">提示词必须明确图1是底图、后续图片只是角色外观参考。参考图是头像或表情包时，建议「绘图 API → 尺寸」选 <code>reference</code>，避免输出被角色立绘的比例带偏。</p>
@@ -1110,9 +1116,11 @@
     document.querySelector("#setting-drawing-replace-templates").value = settings.drawing.replace_templates.join("\n");
     document.querySelector("#setting-drawing-together-templates").value = settings.drawing.together_templates.join("\n");
     document.querySelector("#setting-drawing-group-templates").value = settings.drawing.group_templates.join("\n");
+    document.querySelector("#setting-drawing-free-templates").value = settings.drawing.free_templates.join("\n");
     document.querySelector("#setting-drawing-replace-prompt").value = settings.drawing.replace_prompt;
     document.querySelector("#setting-drawing-together-prompt").value = settings.drawing.together_prompt;
     document.querySelector("#setting-drawing-group-prompt").value = settings.drawing.group_prompt;
+    document.querySelector("#setting-drawing-fallback-prompt").value = settings.drawing.fallback_prompt;
     document.querySelector("#setting-drawing-min-roles").value = String(settings.drawing.min_group_roles);
     document.querySelector("#setting-drawing-max-roles").value = String(settings.drawing.max_group_roles);
     document.querySelector("#setting-queue-concurrent").value = String(settings.task_queue.max_concurrent_tasks);
@@ -1169,9 +1177,11 @@
         replace_templates: parseTemplateList(document.querySelector("#setting-drawing-replace-templates").value),
         together_templates: parseTemplateList(document.querySelector("#setting-drawing-together-templates").value),
         group_templates: parseTemplateList(document.querySelector("#setting-drawing-group-templates").value),
+        free_templates: parseTemplateList(document.querySelector("#setting-drawing-free-templates").value),
         replace_prompt: document.querySelector("#setting-drawing-replace-prompt").value,
         together_prompt: document.querySelector("#setting-drawing-together-prompt").value,
         group_prompt: document.querySelector("#setting-drawing-group-prompt").value,
+        fallback_prompt: document.querySelector("#setting-drawing-fallback-prompt").value,
         min_group_roles: Number(document.querySelector("#setting-drawing-min-roles").value),
         max_group_roles: Number(document.querySelector("#setting-drawing-max-roles").value)
       },
@@ -1551,6 +1561,7 @@
     cancelled: "已取消"
   };
   const TASK_KIND = {
+    free: "自由绘画",
     replace: "单角色替换",
     together: "双角色替换",
     group: "多人替换"

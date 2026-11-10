@@ -195,6 +195,15 @@ class DrawingConfig(PluginConfigBase):
         default_factory=lambda: ["多人穿{角色名列表} {额外提示词}"],
         description="多人替换触发模板，每行一条；必须包含 {角色名列表}，角色用 @ 分隔。",
     )
+    free_templates: List[str] = Field(
+        default_factory=lambda: ["小花画{提示词}"],
+        description="自由绘画触发模板，每行一条；必须包含 {提示词}，提示词可以为空。",
+    )
+    fallback_prompt: str = Field(
+        default="发挥创意",
+        max_length=8000,
+        description="自由绘画没有填写提示词时使用的兜底提示词。",
+    )
     replace_prompt: str = Field(
         default=_DRAWING_PROMPTS["replace_prompt"],
         max_length=8000,
@@ -335,6 +344,12 @@ class DrawingConfig(PluginConfigBase):
     @classmethod
     def validate_group_templates(cls, values: List[str]) -> List[str]:
         validate_drawing_templates(values, "group")
+        return values
+
+    @field_validator("free_templates")
+    @classmethod
+    def validate_free_templates(cls, values: List[str]) -> List[str]:
+        validate_drawing_templates(values, "free")
         return values
 
     @field_validator("missing_role_reply")

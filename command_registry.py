@@ -18,6 +18,7 @@ COMMAND_SPECS: Tuple[CommandSpec, ...] = (
     CommandSpec("查看角色", "查看角色", "查看角色当前保存的图片"),
     CommandSpec("角色列表", "角色列表", "查看角色库中的角色数量和全部名字"),
     CommandSpec("帮助", "帮助", "以图片汇总当前可用的指令和模板"),
+    CommandSpec("自由绘画", "自由绘画", "不依赖角色库，按提示词自由作画，可选参考图"),
     CommandSpec("单角色替换", "单角色替换", "参考图角色替换为角色库中的一个角色"),
     CommandSpec("双角色替换", "双角色替换", "参考图角色替换为角色库中的两个角色"),
     CommandSpec("多人替换", "多人替换", "参考图角色替换为角色库中的多个角色"),
@@ -31,6 +32,7 @@ ACTION_COMMANDS: Dict[str, str] = {
 }
 
 DRAWING_COMMANDS: Dict[str, str] = {
+    "free": "自由绘画",
     "replace": "单角色替换",
     "together": "双角色替换",
     "group": "多人替换",

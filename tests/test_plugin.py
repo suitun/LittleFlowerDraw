@@ -569,6 +569,30 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rpc.images, [generated])
         self.assertEqual(self.rpc.at_targets, [])
 
+    async def test_free_drawing_uses_fallback_prompt_and_no_reference(self) -> None:
+        self.set_drawing_api()
+        generated = png("orange")
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate_text",
+            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
+        ) as generate_text, patch.object(
+            PLUGIN_MODULE.LittleFlowerDrawPlugin,
+            "_save_drawing_image",
+            return_value=Path(self.temporary.name) / "free.png",
+        ):
+            self.clear_output()
+            await self.submit(self.message("小花画"))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+        self.assertEqual(finished.status, "succeeded")
+        self.assertEqual(finished.kind, "free")
+        self.assertEqual(finished.role_names, [])
+        self.assertEqual(finished.final_prompt, "发挥创意")
+        self.assertEqual(finished.reference_path, "")
+        self.assertEqual(self.rpc.images, [generated])
+        generate_text.assert_called_once()
+
     async def test_webui_drawing_models_queries_configured_endpoint(self) -> None:
         with patch.object(PLUGIN_MODULE, "fetch_models", return_value=["gpt-image-1", "flux-image"]):
             result = await self.plugin.webui_drawing_models("https://relay.test/v1", "secret")

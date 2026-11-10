@@ -119,6 +119,21 @@ class DrawingApiTests(unittest.TestCase):
             OpenAIImageClient().generate(config, "换装", [png(900, 1600)])
         self.assertIn(b'name="size"\r\n\r\n1024x1536', mocked.call_args.args[0].data)
 
+    def test_text_generation_uses_generations_endpoint(self) -> None:
+        response = MagicMock()
+        response.read.return_value = json.dumps(
+            {"data": [{"b64_json": base64.b64encode(png()).decode()}]}
+        ).encode()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        config = DrawingApiConfig(base_url="https://relay.test/v1", api_key="secret", model="gpt-image-2")
+        with patch("drawing_api.urlopen", return_value=response) as mocked:
+            result = OpenAIImageClient().generate_text(config, "星空")
+        request = mocked.call_args.args[0]
+        self.assertEqual(request.full_url, "https://relay.test/v1/images/generations")
+        self.assertIn(b'"prompt": "\\u661f\\u7a7a"', request.data)
+        self.assertEqual(result.image, png())
+
     def test_http_400_becomes_short_image_rejected_error(self) -> None:
         error = HTTPError(
             "https://relay.test/v1/images/edits",
