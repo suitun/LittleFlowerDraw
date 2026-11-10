@@ -11,6 +11,11 @@ import unicodedata
 ROLE_FIELD = "{角色名}"
 REPLY_FIELDS = {"角色名"}
 GUARD_FIELDS = {"指令", "重置时间"}
+DRAWING_FIELDS = {"类型", "角色数量"}
+DRAWING_COUNT_FIELDS = {"最少", "最多"}
+DRAWING_ERROR_FIELDS = {"错误"}
+TASK_FIELDS = {"任务ID", "排队数"}
+TASK_FAIL_FIELDS = {"任务ID", "错误"}
 
 
 @dataclass(frozen=True)
@@ -82,9 +87,49 @@ def validate_guard_reply(template: str) -> str:
     return _validate_template_fields(template, GUARD_FIELDS, "权限提示仅支持 {指令}、{重置时间}，不支持格式化指令")
 
 
+def validate_drawing_reply(template: str) -> str:
+    return _validate_template_fields(template, DRAWING_FIELDS, "绘图提示仅支持 {类型}、{角色数量}，不支持格式化指令")
+
+
+def validate_drawing_count_reply(template: str) -> str:
+    return _validate_template_fields(template, DRAWING_COUNT_FIELDS, "人数提示仅支持 {最少}、{最多}，不支持格式化指令")
+
+
+def validate_drawing_error_reply(template: str) -> str:
+    return _validate_template_fields(template, DRAWING_ERROR_FIELDS, "绘图错误提示仅支持 {错误}，不支持格式化指令")
+
+
+def validate_task_reply(template: str) -> str:
+    return _validate_template_fields(template, TASK_FIELDS, "任务提示仅支持 {任务ID}、{排队数}，不支持格式化指令")
+
+
+def validate_task_fail_reply(template: str) -> str:
+    return _validate_template_fields(template, TASK_FAIL_FIELDS, "任务失败提示仅支持 {任务ID}、{错误}，不支持格式化指令")
+
+
 def render_reply(template: str, role_name: str = "") -> str:
     return template.format_map({"角色名": role_name})
 
 
 def render_guard_reply(template: str, command_name: str, reset_time: str) -> str:
     return template.format_map({"指令": command_name, "重置时间": reset_time})
+
+
+def render_drawing_reply(template: str, drawing_type: str, role_count: int) -> str:
+    return template.format_map({"类型": drawing_type, "角色数量": role_count})
+
+
+def render_drawing_count_reply(template: str, minimum: int, maximum: int) -> str:
+    return template.format_map({"最少": minimum, "最多": maximum})
+
+
+def render_drawing_error_reply(template: str, error: str) -> str:
+    return template.format_map({"错误": error})
+
+
+def render_task_reply(template: str, task_id: int, queue_count: int = 0) -> str:
+    return template.format_map({"任务ID": task_id, "排队数": queue_count})
+
+
+def render_task_fail_reply(template: str, task_id: int, error: str) -> str:
+    return template.format_map({"任务ID": task_id, "错误": error})

@@ -167,6 +167,14 @@ class RoleStore:
             ).fetchone()
         return RoleSummary(*row) if row is not None else None
 
+    def list_names(self, scope_id: str) -> List[str]:
+        """读取全部角色名，供双角色绘图拆分名称。"""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT role_name FROM roles WHERE scope_id = ? ORDER BY role_name", (scope_id,)
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
     def list_roles(
         self, scope_id: str, query: str = "", limit: int = 20, offset: int = 0, sort: str = "name"
     ) -> List[RoleSummary]:

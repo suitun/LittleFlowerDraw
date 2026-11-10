@@ -71,10 +71,14 @@ class CommandGuard:
             format_reset_hint(status.reset_at),
         )
 
-    def record_success(self, command_id: str, user_id: str) -> None:
-        """只在指令真正成功后记一次。"""
+    def record_success(self, command_id: str, user_id: str) -> int:
+        """只在任务成功入队后记一次，返回计数窗口起点。"""
         settings = self._settings_store.current()
         if self.is_admin(settings, user_id):
-            return
+            return 0
         policy = self.policy_for(settings, command_id)
-        self._usage_store.record_success(user_id, command_id, policy.limit, policy.reset_days)
+        return self._usage_store.record_success(user_id, command_id, policy.limit, policy.reset_days)
+
+    def refund_task(self, task_id: int, command_id: str, user_id: str, window_start: int) -> bool:
+        """任务失败或被取消时按任务 ID 退还一次。"""
+        return self._usage_store.refund_once(task_id, user_id, command_id, window_start)

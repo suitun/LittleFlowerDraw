@@ -55,31 +55,16 @@ class RolePatternTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 settings.ReplyConfig(registered=text)
 
-    def test_old_config_is_extended_and_schema_exposes_hot_settings(self):
+    def test_plugin_config_only_keeps_core_section(self):
         from maibot_sdk.config import generate_plugin_config_schema
 
         config = settings.LittleFlowerDrawConfig(plugin={"enabled": True, "config_version": "0.1.0"})
         self.assertTrue(config.plugin.enabled)
-        self.assertEqual(config.keywords.register_templates, ["小花小花这是 {角色名}"])
+        self.assertEqual(settings.KeywordConfig().register_templates, ["小花小花这是 {角色名}"])
         schema = generate_plugin_config_schema(settings.LittleFlowerDrawConfig)
-        self.assertTrue(schema)
-        self.assertIn("keywords", schema["sections"])
-        self.assertIn("replies", schema["sections"])
-        first, second = settings.KeywordConfig(), settings.KeywordConfig()
-        first.register_templates.append("记住{角色名}")
-        self.assertNotIn("记住{角色名}", second.register_templates)
-
-
-    def test_old_config_is_extended_and_schema_exposes_hot_settings(self):
-        from maibot_sdk.config import generate_plugin_config_schema
-
-        config = settings.LittleFlowerDrawConfig(plugin={"enabled": True, "config_version": "0.1.0"})
-        self.assertTrue(config.plugin.enabled)
-        self.assertEqual(config.keywords.register_templates, ["小花小花这是 {角色名}"])
-        schema = generate_plugin_config_schema(settings.LittleFlowerDrawConfig)
-        self.assertTrue(schema)
-        self.assertIn("keywords", schema["sections"])
-        self.assertIn("replies", schema["sections"])
+        self.assertIn("plugin", schema["sections"])
+        self.assertNotIn("keywords", schema["sections"])
+        self.assertNotIn("replies", schema["sections"])
         first, second = settings.KeywordConfig(), settings.KeywordConfig()
         first.register_templates.append("记住{角色名}")
         self.assertNotIn("记住{角色名}", second.register_templates)

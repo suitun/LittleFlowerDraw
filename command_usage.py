@@ -64,6 +64,12 @@ class CommandUsageStore:
                     used INTEGER NOT NULL CHECK (used >= 0),
                     PRIMARY KEY (user_id, command_id)
                 );
+                CREATE TABLE IF NOT EXISTS command_usage_refunds (
+                    task_id INTEGER PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    command_id TEXT NOT NULL,
+                    refunded_at INTEGER NOT NULL
+                );
                 """
             )
             connection.execute("PRAGMA user_version = 1")
@@ -113,10 +119,10 @@ class CommandUsageStore:
         limit: int,
         reset_days: int,
         now: Optional[float] = None,
-    ) -> None:
-        """成功执行后额外记一次；失败请求不应调用。"""
+    ) -> int:
+        """成功执行后额外记一次；返回计数窗口起点，失败请求不应调用。"""
         if limit <= 0:
-            return
+            return 0
         if not user_id or not command_id:
             raise ValueError("用户和指令不能为空")
         current = time.time() if now is None else now
@@ -141,3 +147,38 @@ class CommandUsageStore:
                 "ON CONFLICT (user_id, command_id) DO UPDATE SET window_start = excluded.window_start, used = excluded.used",
                 (user_id, command_id, window_start, used),
             )
+        return window_start
+
+    def refund_once(
+        self,
+        task_id: int,
+        user_id: str,
+        command_id: str,
+        window_start: int,
+        now: Optional[float] = None,
+    ) -> bool:
+        """按任务 ID 幂等退还一次；窗口已经重置时不扣新窗口的次数。"""
+        if task_id < 0 or not user_id or not command_id:
+            raise ValueError("任务、用户和指令不能为空")
+        current = int(time.time() if now is None else now)
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute(
+                    "INSERT INTO command_usage_refunds (task_id, user_id, command_id, refunded_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (task_id, user_id, command_id, current),
+                )
+            except sqlite3.IntegrityError:
+                return False
+            if window_start > 0:
+                row = connection.execute(
+                    "SELECT window_start, used FROM command_usage WHERE user_id = ? AND command_id = ?",
+                    (user_id, command_id),
+                ).fetchone()
+                if row is not None and int(row[0]) == window_start and int(row[1]) > 0:
+                    connection.execute(
+                        "UPDATE command_usage SET used = used - 1 WHERE user_id = ? AND command_id = ?",
+                        (user_id, command_id),
+                    )
+        return True

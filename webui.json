@@ -5,7 +5,7 @@
     {
       "id": "home",
       "title": "小花绘",
-      "description": "角色库、权限设置与后续绘图模块的统一入口。",
+      "description": "角色库、插件设置与后续绘图模块的统一入口。",
       "icon": "puzzle",
       "mode": "custom",
       "entry": "webui/roles.html",
@@ -38,6 +38,38 @@
         "settings": {
           "api": "webui_settings",
           "version": "1"
+        },
+        "drawing_api": {
+          "api": "webui_drawing_api",
+          "version": "1"
+        },
+        "current_tasks": {
+          "api": "webui_current_tasks",
+          "version": "1"
+        },
+        "task_history": {
+          "api": "webui_task_history",
+          "version": "1",
+          "parameters": {
+            "page": {"type": "integer", "minimum": 1, "maximum": 100000},
+            "page_size": {"type": "integer", "minimum": 5, "maximum": 50},
+            "status": {"type": "string", "choices": ["", "succeeded", "failed", "cancelled"]},
+            "query": {"type": "string", "max_length": 128}
+          }
+        },
+        "task_detail": {
+          "api": "webui_task_detail",
+          "version": "1",
+          "parameters": {
+            "task_id": {"type": "integer", "minimum": 0, "maximum": 2147483647, "required": true}
+          }
+        },
+        "task_thumbnail": {
+          "api": "webui_task_thumbnail",
+          "version": "1",
+          "parameters": {
+            "task_id": {"type": "integer", "minimum": 0, "maximum": 2147483647, "required": true}
+          }
         }
       },
       "actions": {
@@ -46,6 +78,42 @@
           "version": "1",
           "parameters": {
             "settings_json": {"type": "string", "required": true, "max_length": 65536}
+          }
+        },
+        "save_drawing_api": {
+          "api": "webui_drawing_api_save",
+          "version": "1",
+          "parameters": {
+            "api_json": {"type": "string", "required": true, "max_length": 65536}
+          }
+        },
+        "fetch_models": {
+          "api": "webui_drawing_models",
+          "version": "1",
+          "parameters": {
+            "base_url": {"type": "string", "max_length": 2000},
+            "api_key": {"type": "string", "max_length": 4000}
+          }
+        },
+        "cancel_task": {
+          "api": "webui_task_cancel",
+          "version": "1",
+          "parameters": {
+            "task_id": {"type": "integer", "minimum": 0, "maximum": 2147483647, "required": true}
+          }
+        },
+        "retry_task": {
+          "api": "webui_task_retry",
+          "version": "1",
+          "parameters": {
+            "task_id": {"type": "integer", "minimum": 0, "maximum": 2147483647, "required": true}
+          }
+        },
+        "delete_tasks": {
+          "api": "webui_task_delete",
+          "version": "1",
+          "parameters": {
+            "ids_json": {"type": "string", "required": true, "max_length": 65536}
           }
         },
         "delete": {

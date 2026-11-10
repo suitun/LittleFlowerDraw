@@ -30,7 +30,19 @@
     .settings-inline input[type="checkbox"] { width: 18px; height: 18px; }
     .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
     .settings-field textarea { width: 100%; resize: vertical; min-height: 110px; font-family: inherit; }
+    .settings-field textarea.reply-text { min-height: 58px; }
     .settings-field input[type="text"], .settings-field input[type="number"] { width: 100%; }
+    .field-with-button { display: flex; gap: 8px; align-items: center; }
+    .field-with-button .maibot-input { flex: 1; min-width: 0; }
+    .field-with-button .maibot-button { white-space: nowrap; }
+    .model-combobox { position: relative; flex: 1; min-width: 0; }
+    .model-combobox .maibot-input { width: 100%; padding-right: 34px; }
+    .model-toggle { position: absolute; top: 1px; right: 1px; bottom: 1px; width: 32px; border: 0; border-left: 1px solid var(--maibot-border); background: transparent; color: var(--maibot-muted); cursor: pointer; border-radius: 0 calc(var(--maibot-radius) - 2px) calc(var(--maibot-radius) - 2px) 0; }
+    .model-toggle:hover { color: var(--maibot-foreground); background: var(--maibot-soft); }
+    .model-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; max-height: 240px; overflow-y: auto; padding: 4px; background: var(--maibot-surface); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+    .model-option { display: block; width: 100%; padding: 7px 9px; border: 0; border-radius: calc(var(--maibot-radius) - 3px); background: transparent; color: var(--maibot-foreground); text-align: left; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+    .model-option:hover, .model-option:focus-visible { background: var(--maibot-soft); }
+    .model-empty { padding: 8px 9px; color: var(--maibot-muted); font-size: 13px; }
     .policy-list { display: grid; gap: 12px; margin-top: 12px; }
     .policy-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(130px, 0.8fr) minmax(150px, 1fr) minmax(150px, 1fr); gap: 12px; align-items: end; padding: 12px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-background); }
     .policy-row label { display: grid; gap: 4px; font-size: 13px; color: var(--maibot-muted); }
@@ -38,8 +50,29 @@
     .policy-command { align-self: center; font-weight: 600; overflow-wrap: anywhere; }
     .settings-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
     #settings-status { min-height: 22px; font-size: 14px; }
-    #settings-status.error, .error { color: var(--maibot-danger); }
+    #api-status { min-height: 22px; font-size: 14px; }
+    #settings-status.error, #api-status.error, .error { color: var(--maibot-danger); }
     .placeholder { padding: 48px 20px; text-align: center; color: var(--maibot-muted); border: 1px dashed var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
+    .task-list { display: grid; gap: 10px; }
+    .task-card { padding: 14px 16px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
+    .task-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+    .task-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .task-id { font-weight: 700; font-size: 16px; }
+    .task-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: var(--maibot-soft); color: var(--maibot-muted); }
+    .task-badge.running { color: #b86b00; background: rgba(255, 170, 0, 0.14); }
+    .task-badge.succeeded { color: #20854e; background: rgba(32, 133, 78, 0.14); }
+    .task-badge.failed { color: var(--maibot-danger); background: rgba(200, 50, 50, 0.12); }
+    .task-badge.cancelled { color: var(--maibot-muted); background: var(--maibot-soft); }
+    .task-meta { margin-top: 6px; color: var(--maibot-muted); font-size: 13px; overflow-wrap: anywhere; }
+    .task-prompt { margin-top: 8px; color: var(--maibot-muted); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .task-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .task-actions .maibot-button { padding: 5px 10px; font-size: 13px; }
+    .task-check { display: inline-flex; align-items: center; gap: 6px; color: var(--maibot-muted); font-size: 13px; }
+    .task-check input { width: 16px; height: 16px; }
+    .task-bulk-actions { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+    .task-detail-grid { display: grid; gap: 8px; margin: 10px 0; }
+    .task-detail-label { color: var(--maibot-muted); font-size: 13px; }
+    .task-detail-value { white-space: pre-wrap; overflow-wrap: anywhere; }
     #status { min-height: 22px; font-size: 14px; }
     #status.error { color: var(--maibot-danger); }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
@@ -92,9 +125,9 @@
 
   <nav class="module-nav" aria-label="小花绘模块">
     <button type="button" data-module="roles" class="active">角色库</button>
-    <button type="button" data-module="settings">权限与设置</button>
-    <button type="button" data-module="draw">绘图任务</button>
-    <button type="button" data-module="history">历史任务</button>
+    <button type="button" data-module="settings">插件设置</button>
+    <button type="button" data-module="draw">当前任务</button>
+    <button type="button" data-module="history">任务历史</button>
     <button type="button" data-module="api">绘图 API</button>
     <button type="button" data-module="prompts">提示词模板</button>
   </nav>
@@ -128,11 +161,101 @@
   <section id="module-settings" class="module" hidden>
     <div class="module-head">
       <div>
-        <h2>权限与设置</h2>
-        <p class="muted">这些设置保存在插件数据目录，保存后新消息立即使用新规则。</p>
+        <h2>插件设置</h2>
+        <p class="muted">角色库触发词、回复、图片限制和聊天权限都保存在插件数据目录中，保存后立即生效。</p>
       </div>
     </div>
     <form id="settings-form">
+      <fieldset class="settings-card">
+        <legend>角色库触发词</legend>
+        <div class="settings-grid">
+          <label class="settings-field">登记 / 覆盖模板（每行一条）
+            <textarea id="setting-register-templates" class="maibot-input" rows="3" placeholder="小花小花这是 {角色名}"></textarea>
+          </label>
+          <label class="settings-field">查看模板（每行一条）
+            <textarea id="setting-view-templates" class="maibot-input" rows="3" placeholder="小花小花我要看{角色名}"></textarea>
+          </label>
+        </div>
+        <p class="muted">每条模板必须且只能包含一个 {角色名}，角色名前需要固定触发文字。</p>
+      </fieldset>
+
+      <fieldset class="settings-card">
+        <legend>角色库回复</legend>
+        <div class="settings-grid">
+          <label class="settings-field">首次登记<textarea id="setting-reply-registered" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">同名覆盖<textarea id="setting-reply-overwritten" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">查看前文案<textarea id="setting-reply-view" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">没有找到<textarea id="setting-reply-not-found" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">缺少图片<textarea id="setting-reply-missing-image" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">名字不合法<textarea id="setting-reply-invalid-name" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">图片不合法<textarea id="setting-reply-invalid-image" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">队列忙<textarea id="setting-reply-busy" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">内部错误<textarea id="setting-reply-error" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+        </div>
+        <p class="muted">角色回复只支持 {角色名}；查看前文案留空时只发图片。</p>
+      </fieldset>
+
+      <fieldset class="settings-card">
+        <legend>角色库限制</legend>
+        <div class="settings-grid">
+          <label class="settings-field">角色名最大字符数<input id="setting-max-name-length" class="maibot-input" type="number" min="1" max="256"></label>
+          <label class="settings-field">单图最大 MB<input id="setting-max-image-mb" class="maibot-input" type="number" min="1" max="8"></label>
+          <label class="settings-field">单图最大像素数<input id="setting-max-pixels" class="maibot-input" type="number" min="1" max="80000000"></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-card">
+        <legend>绘图指令</legend>
+        <div class="settings-grid">
+          <label class="settings-field">单角色替换模板（每行一条）
+            <textarea id="setting-drawing-replace-templates" class="maibot-input" rows="3" placeholder="变{角色名} {额外提示词}"></textarea>
+          </label>
+          <label class="settings-field">双角色替换模板（每行一条）
+            <textarea id="setting-drawing-together-templates" class="maibot-input" rows="3" placeholder="{角色名1}{角色名2}一起穿 {额外提示词}"></textarea>
+          </label>
+          <label class="settings-field">多人替换模板（每行一条）
+            <textarea id="setting-drawing-group-templates" class="maibot-input" rows="3" placeholder="多人穿{角色名列表} {额外提示词}"></textarea>
+          </label>
+        </div>
+        <p class="muted">多人替换用 @ 分隔角色，例如 <code>多人穿@角色1@角色2@角色3 换装</code>；{额外提示词} 可省略。</p>
+        <div class="settings-grid">
+          <label class="settings-field">单角色基础提示词
+            <textarea id="setting-drawing-replace-prompt" class="maibot-input" rows="3"></textarea>
+          </label>
+          <label class="settings-field">双角色基础提示词
+            <textarea id="setting-drawing-together-prompt" class="maibot-input" rows="3"></textarea>
+          </label>
+          <label class="settings-field">多人基础提示词
+            <textarea id="setting-drawing-group-prompt" class="maibot-input" rows="3"></textarea>
+          </label>
+        </div>
+        <div class="settings-grid">
+          <label class="settings-field">多人最少角色数<input id="setting-drawing-min-roles" class="maibot-input" type="number" min="3" max="8"></label>
+          <label class="settings-field">多人最多角色数<input id="setting-drawing-max-roles" class="maibot-input" type="number" min="3" max="8"></label>
+          <label class="settings-field">没有参考图<textarea id="setting-drawing-missing-reference" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">角色不存在<textarea id="setting-drawing-missing-role" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">人数超出范围<textarea id="setting-drawing-group-count" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">画好了<textarea id="setting-drawing-success" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">API 未配置<textarea id="setting-drawing-api-missing" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+          <label class="settings-field">API 调用失败<textarea id="setting-drawing-api-error" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-card">
+        <legend>任务队列</legend>
+        <div class="settings-grid">
+          <label class="settings-field">同时执行任务数<input id="setting-queue-concurrent" class="maibot-input" type="number" min="1" max="8"></label>
+          <label class="settings-field">最多排队任务数（0=不限）<input id="setting-queue-waiting" class="maibot-input" type="number" min="0" max="1000"></label>
+          <label class="settings-field">任务超时秒数<input id="setting-queue-timeout" class="maibot-input" type="number" min="30" max="3600"></label>
+          <label class="settings-field">队列轮询秒数<input id="setting-queue-poll" class="maibot-input" type="number" min="1" max="60"></label>
+          <label class="settings-field">历史保留天数（0=不清理）<input id="setting-queue-history-days" class="maibot-input" type="number" min="0" max="3650"></label>
+          <label class="settings-field">输出图片保留天数（0=不清理）<input id="setting-queue-output-days" class="maibot-input" type="number" min="0" max="3650"></label>
+        </div>
+        <label class="settings-inline">
+          <input id="setting-queue-paused" type="checkbox"> 暂停领取新任务（当前任务继续完成）
+        </label>
+      </fieldset>
+
       <fieldset class="settings-card">
         <legend>管理员与白名单</legend>
         <label class="settings-field">管理员 QQ
@@ -179,18 +302,94 @@
   </section>
 
   <section id="module-draw" class="module" hidden>
-    <div class="module-head"><div><h2>绘图任务</h2><p class="muted">提交绘图任务、查看排队状态。</p></div></div>
-    <div class="placeholder">绘图任务模块正在开发中，后续会接入绘图 API 与任务队列。</div>
+    <div class="module-head">
+      <div>
+        <h2>当前任务</h2>
+        <p class="muted">排队中和绘制中的任务；每人同时只允许一个未结束任务。</p>
+      </div>
+      <div class="actions">
+        <button id="current-refresh" class="maibot-button" type="button">刷新</button>
+      </div>
+    </div>
+    <p id="current-stats" class="muted">正在加载…</p>
+    <p id="current-status" role="status" aria-live="polite"></p>
+    <div id="current-list" class="task-list"></div>
   </section>
 
   <section id="module-history" class="module" hidden>
-    <div class="module-head"><div><h2>历史任务</h2><p class="muted">查看已完成、失败或取消的绘图任务。</p></div></div>
-    <div class="placeholder">历史任务模块正在开发中。</div>
+    <div class="module-head">
+      <div>
+        <h2>任务历史</h2>
+        <p class="muted">已完成、失败和已取消的绘图任务；终态任务可以批量管理。</p>
+      </div>
+      <div class="actions">
+        <select id="history-status-filter" class="maibot-select" aria-label="筛选任务状态">
+          <option value="">全部状态</option>
+          <option value="succeeded">已完成</option>
+          <option value="failed">失败</option>
+          <option value="cancelled">已取消</option>
+        </select>
+        <input id="history-query" class="maibot-input" type="search" placeholder="任务 ID / 发起人 / 角色" aria-label="搜索任务">
+        <button id="history-refresh" class="maibot-button" type="button">刷新</button>
+      </div>
+    </div>
+    <p id="history-stats" class="muted">正在加载…</p>
+    <p id="history-status" role="status" aria-live="polite"></p>
+    <div class="task-bulk-actions">
+      <button id="history-retry" class="maibot-button" type="button">重试选中</button>
+      <button id="history-delete" class="maibot-button" type="button">删除选中</button>
+    </div>
+    <div id="history-list" class="task-list"></div>
+    <nav id="history-pager" class="pager" hidden>
+      <button id="history-prev" class="maibot-button" type="button">上一页</button>
+      <span id="history-page-label" class="muted"></span>
+      <button id="history-next" class="maibot-button" type="button">下一页</button>
+    </nav>
   </section>
 
   <section id="module-api" class="module" hidden>
-    <div class="module-head"><div><h2>绘图 API</h2><p class="muted">配置绘图服务地址、密钥和模型参数。</p></div></div>
-    <div class="placeholder">绘图 API 配置模块正在开发中。</div>
+    <div class="module-head">
+      <div>
+        <h2>绘图 API</h2>
+        <p class="muted">配置 OpenAI 兼容的图片编辑接口；当前支持多图参考的 image edits 调用。</p>
+      </div>
+    </div>
+    <fieldset class="settings-card">
+      <legend>OpenAI 图片接口</legend>
+      <label class="settings-field">API URL
+        <input id="api-url" class="maibot-input" type="url" placeholder="https://中转站地址/v1" autocomplete="off">
+      </label>
+      <p class="muted">可以填到 <code>/v1</code>，也可以直接填完整的 <code>/v1/images/edits</code>。</p>
+      <label class="settings-field">API Token
+        <input id="api-token" class="maibot-input" type="password" placeholder="sk-..." autocomplete="off">
+      </label>
+      <div class="settings-grid">
+        <label class="settings-field">模型
+          <div class="field-with-button">
+            <div class="model-combobox">
+              <input id="api-model" class="maibot-input" type="text" placeholder="gpt-image-1" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="api-model-menu">
+              <button id="api-model-toggle" class="model-toggle" type="button" aria-label="展开模型列表">▾</button>
+              <div id="api-model-menu" class="model-menu" role="listbox" hidden></div>
+            </div>
+            <button id="api-models" class="maibot-button" type="button">拉取模型</button>
+          </div>
+        </label>
+        <label class="settings-field">尺寸
+          <div class="model-combobox">
+            <input id="api-size" class="maibot-input" type="text" placeholder="auto" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="api-size-menu">
+            <button id="api-size-toggle" class="model-toggle" type="button" aria-label="展开尺寸列表">▾</button>
+            <div id="api-size-menu" class="model-menu" role="listbox" hidden></div>
+          </div>
+        </label>
+        <label class="settings-field">超时秒数<input id="api-timeout" class="maibot-input" type="number" min="30" max="600"></label>
+      </div>
+      <p class="muted">尺寸可填 auto、reference（按参考图比例选最近的官方尺寸），或 256-2048 边长、最多 400 万像素的自定义尺寸。模型可向接口的 <code>/v1/models</code> 查询，查不到时也可以手动填写。</p>
+      <p id="api-endpoint" class="muted"></p>
+      <div class="settings-footer">
+        <p id="api-status" role="status" aria-live="polite"></p>
+        <button id="api-save" class="maibot-button maibot-button-primary" type="button">保存 API 配置</button>
+      </div>
+    </fieldset>
   </section>
 
   <section id="module-prompts" class="module" hidden>
@@ -243,6 +442,20 @@
   const moduleButtons = [...document.querySelectorAll(".module-nav button")];
   const modules = [...document.querySelectorAll(".module")];
   let settingsLoaded = false;
+  let apiLoaded = false;
+  let apiModels = [];
+  let currentTasksLoading = false;
+  let historyPage = 1;
+  let historyPages = 1;
+  let historySearchTimer = 0;
+  const historySelected = new Set();
+  const SIZE_OPTIONS = [
+    {value: "auto", label: "auto（API 自动选择）"},
+    {value: "reference", label: "reference（跟随参考图比例）"},
+    {value: "1024x1024", label: "1024x1024（方形）"},
+    {value: "1536x1024", label: "1536x1024（横向）"},
+    {value: "1024x1536", label: "1024x1536（纵向）"}
+  ];
 
   function make(tag, className, text) {
     const node = document.createElement(tag);
@@ -722,6 +935,10 @@
     return text.split(/\r?\n|,|，/).map(value => value.trim()).filter(Boolean);
   }
 
+  function parseTemplateList(text) {
+    return text.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  }
+
   function renderPolicies(policies) {
     policyList.replaceChildren();
     for (const policy of policies) {
@@ -764,6 +981,41 @@
   }
 
   function fillSettings(settings) {
+    document.querySelector("#setting-register-templates").value = settings.keywords.register_templates.join("\n");
+    document.querySelector("#setting-view-templates").value = settings.keywords.view_templates.join("\n");
+    document.querySelector("#setting-reply-registered").value = settings.replies.registered;
+    document.querySelector("#setting-reply-overwritten").value = settings.replies.overwritten;
+    document.querySelector("#setting-reply-view").value = settings.replies.view;
+    document.querySelector("#setting-reply-not-found").value = settings.replies.not_found;
+    document.querySelector("#setting-reply-missing-image").value = settings.replies.missing_image;
+    document.querySelector("#setting-reply-invalid-name").value = settings.replies.invalid_name;
+    document.querySelector("#setting-reply-invalid-image").value = settings.replies.invalid_image;
+    document.querySelector("#setting-reply-busy").value = settings.replies.busy;
+    document.querySelector("#setting-reply-error").value = settings.replies.error;
+    document.querySelector("#setting-max-name-length").value = String(settings.library.max_name_length);
+    document.querySelector("#setting-max-image-mb").value = String(settings.library.max_image_mb);
+    document.querySelector("#setting-max-pixels").value = String(settings.library.max_pixels);
+    document.querySelector("#setting-drawing-replace-templates").value = settings.drawing.replace_templates.join("\n");
+    document.querySelector("#setting-drawing-together-templates").value = settings.drawing.together_templates.join("\n");
+    document.querySelector("#setting-drawing-group-templates").value = settings.drawing.group_templates.join("\n");
+    document.querySelector("#setting-drawing-replace-prompt").value = settings.drawing.replace_prompt;
+    document.querySelector("#setting-drawing-together-prompt").value = settings.drawing.together_prompt;
+    document.querySelector("#setting-drawing-group-prompt").value = settings.drawing.group_prompt;
+    document.querySelector("#setting-drawing-min-roles").value = String(settings.drawing.min_group_roles);
+    document.querySelector("#setting-drawing-max-roles").value = String(settings.drawing.max_group_roles);
+    document.querySelector("#setting-drawing-missing-reference").value = settings.drawing.missing_reference_reply;
+    document.querySelector("#setting-drawing-missing-role").value = settings.drawing.missing_role_reply;
+    document.querySelector("#setting-drawing-group-count").value = settings.drawing.group_count_reply;
+    document.querySelector("#setting-drawing-success").value = settings.drawing.success_reply;
+    document.querySelector("#setting-drawing-api-missing").value = settings.drawing.api_missing_reply;
+    document.querySelector("#setting-drawing-api-error").value = settings.drawing.api_error_reply;
+    document.querySelector("#setting-queue-concurrent").value = String(settings.task_queue.max_concurrent_tasks);
+    document.querySelector("#setting-queue-waiting").value = String(settings.task_queue.max_waiting_tasks);
+    document.querySelector("#setting-queue-timeout").value = String(settings.task_queue.task_timeout_seconds);
+    document.querySelector("#setting-queue-poll").value = String(settings.task_queue.poll_interval_seconds);
+    document.querySelector("#setting-queue-history-days").value = String(settings.task_queue.history_retention_days);
+    document.querySelector("#setting-queue-output-days").value = String(settings.task_queue.output_retention_days);
+    document.querySelector("#setting-queue-paused").checked = settings.task_queue.queue_paused;
     document.querySelector("#setting-admin").value = settings.access.admin_qq;
     document.querySelector("#setting-whitelist").checked = settings.access.whitelist_enabled;
     document.querySelector("#setting-groups").value = settings.access.group_whitelist.join("\n");
@@ -799,6 +1051,51 @@
   async function saveSettings() {
     const button = document.querySelector("#settings-save");
     const payload = {
+      keywords: {
+        register_templates: parseTemplateList(document.querySelector("#setting-register-templates").value),
+        view_templates: parseTemplateList(document.querySelector("#setting-view-templates").value)
+      },
+      replies: {
+        registered: document.querySelector("#setting-reply-registered").value,
+        overwritten: document.querySelector("#setting-reply-overwritten").value,
+        view: document.querySelector("#setting-reply-view").value,
+        not_found: document.querySelector("#setting-reply-not-found").value,
+        missing_image: document.querySelector("#setting-reply-missing-image").value,
+        invalid_name: document.querySelector("#setting-reply-invalid-name").value,
+        invalid_image: document.querySelector("#setting-reply-invalid-image").value,
+        busy: document.querySelector("#setting-reply-busy").value,
+        error: document.querySelector("#setting-reply-error").value
+      },
+      library: {
+        max_name_length: Number(document.querySelector("#setting-max-name-length").value),
+        max_image_mb: Number(document.querySelector("#setting-max-image-mb").value),
+        max_pixels: Number(document.querySelector("#setting-max-pixels").value)
+      },
+      drawing: {
+        replace_templates: parseTemplateList(document.querySelector("#setting-drawing-replace-templates").value),
+        together_templates: parseTemplateList(document.querySelector("#setting-drawing-together-templates").value),
+        group_templates: parseTemplateList(document.querySelector("#setting-drawing-group-templates").value),
+        replace_prompt: document.querySelector("#setting-drawing-replace-prompt").value,
+        together_prompt: document.querySelector("#setting-drawing-together-prompt").value,
+        group_prompt: document.querySelector("#setting-drawing-group-prompt").value,
+        min_group_roles: Number(document.querySelector("#setting-drawing-min-roles").value),
+        max_group_roles: Number(document.querySelector("#setting-drawing-max-roles").value),
+        missing_reference_reply: document.querySelector("#setting-drawing-missing-reference").value,
+        missing_role_reply: document.querySelector("#setting-drawing-missing-role").value,
+        group_count_reply: document.querySelector("#setting-drawing-group-count").value,
+        success_reply: document.querySelector("#setting-drawing-success").value,
+        api_missing_reply: document.querySelector("#setting-drawing-api-missing").value,
+        api_error_reply: document.querySelector("#setting-drawing-api-error").value
+      },
+      task_queue: {
+        max_concurrent_tasks: Number(document.querySelector("#setting-queue-concurrent").value),
+        max_waiting_tasks: Number(document.querySelector("#setting-queue-waiting").value),
+        task_timeout_seconds: Number(document.querySelector("#setting-queue-timeout").value),
+        poll_interval_seconds: Number(document.querySelector("#setting-queue-poll").value),
+        history_retention_days: Number(document.querySelector("#setting-queue-history-days").value),
+        output_retention_days: Number(document.querySelector("#setting-queue-output-days").value),
+        queue_paused: document.querySelector("#setting-queue-paused").checked
+      },
       access: {
         admin_qq: document.querySelector("#setting-admin").value.trim(),
         whitelist_enabled: document.querySelector("#setting-whitelist").checked,
@@ -832,10 +1129,463 @@
     if (name === "settings") void loadSettings();
   }
 
+  function activateModule(name) {
+    for (const button of moduleButtons) button.classList.toggle("active", button.dataset.module === name);
+    for (const section of modules) section.hidden = section.id !== `module-${name}`;
+    if (name === "settings") void loadSettings();
+    if (name === "api") void loadDrawingApi();
+    if (name === "draw") void loadCurrentTasks();
+    if (name === "history") void loadTaskHistory(1);
+  }
+
+  function setApiStatus(message, isError = false) {
+    const status = document.querySelector("#api-status");
+    status.textContent = message || "";
+    status.className = isError ? "error" : "";
+  }
+
+  async function loadDrawingApi() {
+    if (apiLoaded) return;
+    setApiStatus("正在加载 API 配置…");
+    try {
+      const config = await request("query", "drawing_api");
+      apiModels = [];
+      closeModelMenu();
+      closeSizeMenu();
+      document.querySelector("#api-url").value = config.base_url;
+      document.querySelector("#api-token").value = config.api_key;
+      document.querySelector("#api-model").value = config.model;
+      document.querySelector("#api-size").value = config.size;
+      document.querySelector("#api-timeout").value = String(config.timeout_seconds);
+      document.querySelector("#api-endpoint").textContent = config.endpoint ? `实际请求：${config.endpoint}` : "";
+      apiLoaded = true;
+      setApiStatus(config.configured ? "" : "尚未配置，绘图指令会提示先配置 API");
+    } catch (error) {
+      setApiStatus(error.message || String(error), true);
+    }
+  }
+
+  async function saveDrawingApi() {
+    const button = document.querySelector("#api-save");
+    const payload = {
+      base_url: document.querySelector("#api-url").value.trim(),
+      api_key: document.querySelector("#api-token").value.trim(),
+      model: document.querySelector("#api-model").value.trim(),
+      size: document.querySelector("#api-size").value.trim(),
+      timeout_seconds: Number(document.querySelector("#api-timeout").value)
+    };
+    button.disabled = true;
+    setApiStatus("正在保存…");
+    try {
+      const result = await request("action", "save_drawing_api", {api_json: JSON.stringify(payload)});
+      if (result.error) {
+        setApiStatus(result.error, true);
+        return;
+      }
+      apiLoaded = false;
+      await loadDrawingApi();
+      setApiStatus("API 配置已保存");
+    } catch (error) {
+      setApiStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function fetchDrawingModels() {
+    const button = document.querySelector("#api-models");
+    const baseUrl = document.querySelector("#api-url").value.trim();
+    const apiKey = document.querySelector("#api-token").value.trim();
+    button.disabled = true;
+    setApiStatus("正在拉取模型列表…");
+    try {
+      const result = await request("action", "fetch_models", {base_url: baseUrl, api_key: apiKey});
+      if (result.error) {
+        apiModels = [];
+        closeModelMenu();
+        setApiStatus(result.error, true);
+        return;
+      }
+      apiModels = result.models;
+      openModelMenu();
+      setApiStatus(`已获取 ${result.models.length} 个模型，点输入框或右侧箭头选择`);
+    } catch (error) {
+      apiModels = [];
+      closeModelMenu();
+      setApiStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function closeModelMenu() {
+    const menu = document.querySelector("#api-model-menu");
+    menu.hidden = true;
+    document.querySelector("#api-model").setAttribute("aria-expanded", "false");
+  }
+
+  function openModelMenu(filter = "") {
+    const menu = document.querySelector("#api-model-menu");
+    const query = filter.trim().toLowerCase();
+    menu.replaceChildren();
+    if (!apiModels.length) {
+      menu.append(make("div", "model-empty", "先填写 URL 并点「拉取模型」，或直接手动输入模型标识"));
+    } else {
+      const matches = query ? apiModels.filter(model => model.toLowerCase().includes(query)) : apiModels;
+      if (!matches.length) {
+        menu.append(make("div", "model-empty", "没有匹配的模型"));
+      }
+      for (const model of matches) {
+        const option = make("button", "model-option", model);
+        option.type = "button";
+        option.setAttribute("role", "option");
+        option.addEventListener("click", () => {
+          document.querySelector("#api-model").value = model;
+          closeModelMenu();
+          setApiStatus(`已选择模型：${model}`);
+        });
+        menu.append(option);
+      }
+    }
+    menu.hidden = false;
+    document.querySelector("#api-model").setAttribute("aria-expanded", "true");
+  }
+
+  function closeSizeMenu() {
+    const menu = document.querySelector("#api-size-menu");
+    menu.hidden = true;
+    document.querySelector("#api-size").setAttribute("aria-expanded", "false");
+  }
+
+  function openSizeMenu(filter = "") {
+    const menu = document.querySelector("#api-size-menu");
+    const query = filter.trim().toLowerCase();
+    menu.replaceChildren();
+    const matches = SIZE_OPTIONS.filter(
+      option => !query || option.value.toLowerCase().includes(query) || option.label.toLowerCase().includes(query)
+    );
+    if (!matches.length) {
+      menu.append(make("div", "model-empty", "没有匹配的尺寸，可直接输入 宽x高"));
+    }
+    for (const option of matches) {
+      const item = make("button", "model-option", option.label);
+      item.type = "button";
+      item.setAttribute("role", "option");
+      item.addEventListener("click", () => {
+        document.querySelector("#api-size").value = option.value;
+        closeSizeMenu();
+        setApiStatus(`已选择尺寸：${option.value}`);
+      });
+      menu.append(item);
+    }
+    menu.hidden = false;
+    document.querySelector("#api-size").setAttribute("aria-expanded", "true");
+  }
+
+  const TASK_STATUS = {
+    queued: "排队中",
+    running: "绘制中",
+    succeeded: "已完成",
+    failed: "失败",
+    cancelled: "已取消"
+  };
+  const TASK_KIND = {
+    replace: "单角色替换",
+    together: "双角色替换",
+    group: "多人替换"
+  };
+
+  function setTaskStatus(id, message, isError = false) {
+    const node = document.querySelector(id);
+    node.textContent = message || "";
+    node.className = isError ? "error" : "muted";
+  }
+
+  function taskCard(task, history = false) {
+    const card = make("div", "task-card");
+    const head = make("div", "task-card-head");
+    const title = make("div", "task-title");
+    title.append(make("span", "task-id", `#${task.id}`));
+    title.append(make("span", `task-badge ${task.status}`, TASK_STATUS[task.status] || task.status));
+    if (task.stage) title.append(make("span", "muted", `阶段：${task.stage}`));
+    head.append(title);
+
+    const actions = make("div", "task-actions");
+    if (history) {
+      const check = make("label", "task-check");
+      const checkbox = make("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = historySelected.has(task.id);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) historySelected.add(task.id);
+        else historySelected.delete(task.id);
+      });
+      check.append(checkbox, document.createTextNode("选择"));
+      actions.append(check);
+    }
+    const detailButton = make("button", "maibot-button", "详情");
+    detailButton.type = "button";
+    detailButton.addEventListener("click", () => void showTaskDetail(task.id));
+    actions.append(detailButton);
+    if (task.can_cancel) {
+      const cancelButton = make("button", "maibot-button", "取消");
+      cancelButton.type = "button";
+      cancelButton.addEventListener("click", () => void cancelTask(task.id));
+      actions.append(cancelButton);
+    }
+    if (history && task.can_retry) {
+      const retryButton = make("button", "maibot-button", "重试");
+      retryButton.type = "button";
+      retryButton.addEventListener("click", () => void retryTask(task.id));
+      actions.append(retryButton);
+    }
+    head.append(actions);
+    card.append(head);
+
+    const roleText = (task.role_names || []).join("、") || "—";
+    const meta = [
+      `发起人：${task.requester_id}`,
+      `类型：${TASK_KIND[task.kind] || task.command_id}`,
+      `角色：${roleText}`,
+      `创建：${formatTime(task.created_at)}`
+    ];
+    if (task.status === "queued" && task.queue_position > 0) meta.push(`前面还有 ${task.queue_position} 个`);
+    if (task.started_at) meta.push(`开始：${formatTime(task.started_at)}`);
+    if (task.finished_at) meta.push(`结束：${formatTime(task.finished_at)}`);
+    card.append(make("div", "task-meta", meta.join(" · ")));
+    if (task.error) card.append(make("div", "task-prompt error", task.error));
+    return card;
+  }
+
+  async function loadCurrentTasks() {
+    if (currentTasksLoading) return;
+    currentTasksLoading = true;
+    setTaskStatus("#current-status", "正在加载当前任务…");
+    try {
+      const result = await request("query", "current_tasks");
+      const list = document.querySelector("#current-list");
+      list.replaceChildren();
+      const paused = result.config && result.config.queue_paused ? " · 队列已暂停" : "";
+      setTaskStatus(
+        "#current-stats",
+        `排队 ${result.counts.queued} 个 · 执行中 ${result.counts.running} 个${paused}`
+      );
+      if (!result.tasks.length) {
+        list.append(make("div", "placeholder", "现在没有排队或执行中的任务喵～"));
+      } else {
+        for (const task of result.tasks) list.append(taskCard(task));
+      }
+      setTaskStatus("#current-status", "");
+    } catch (error) {
+      setTaskStatus("#current-status", error.message || String(error), true);
+    } finally {
+      currentTasksLoading = false;
+    }
+  }
+
+  async function loadTaskHistory(page = 1) {
+    historyPage = Math.max(1, page);
+    const status = document.querySelector("#history-status-filter").value;
+    const query = document.querySelector("#history-query").value.trim();
+    setTaskStatus("#history-status", "正在加载任务历史…");
+    try {
+      const result = await request("query", "task_history", {
+        page: historyPage,
+        page_size: 20,
+        status,
+        query
+      });
+      historyPages = result.pages;
+      historySelected.clear();
+      const list = document.querySelector("#history-list");
+      list.replaceChildren();
+      setTaskStatus("#history-stats", `共 ${result.total} 个历史任务`);
+      if (!result.tasks.length) {
+        list.append(make("div", "placeholder", "还没有符合条件的任务喵～"));
+      } else {
+        for (const task of result.tasks) list.append(taskCard(task, true));
+      }
+      const pager = document.querySelector("#history-pager");
+      pager.hidden = result.pages <= 1;
+      document.querySelector("#history-page-label").textContent = `第 ${result.page} / ${result.pages} 页`;
+      setTaskStatus("#history-status", "");
+    } catch (error) {
+      setTaskStatus("#history-status", error.message || String(error), true);
+    }
+  }
+
+  async function showTaskDetail(taskId) {
+    openModal(`任务 #${taskId}`, make("p", "muted", "正在加载任务详情…"));
+    try {
+      const task = await request("query", "task_detail", {task_id: taskId});
+      const body = make("div");
+      const meta = make("dl", "meta-list");
+      const rows = [
+        ["状态", `${TASK_STATUS[task.status] || task.status}${task.stage ? `（${task.stage}）` : ""}`],
+        ["类型", TASK_KIND[task.kind] || task.command_id],
+        ["发起人", task.requester_id],
+        ["角色", (task.role_names || []).join("、") || "—"],
+        ["排队位置", task.queue_position || "—"],
+        ["创建时间", formatTime(task.created_at)],
+        ["开始时间", formatTime(task.started_at)],
+        ["结束时间", formatTime(task.finished_at)],
+        ["重试次数", String(task.attempts || 0)],
+        ["模型 / 尺寸", `${task.api_model || "—"} / ${task.api_size || "—"}`]
+      ];
+      for (const [label, value] of rows) {
+        meta.append(make("dt", "", label));
+        meta.append(make("dd", "", value));
+      }
+      body.append(meta);
+      body.append(make("div", "task-detail-label", "最终提示词"));
+      body.append(make("div", "task-detail-value", task.final_prompt || "—"));
+      if (task.extra_prompt) {
+        body.append(make("div", "task-detail-label", "额外提示词"));
+        body.append(make("div", "task-detail-value", task.extra_prompt));
+      }
+      if (task.error) {
+        body.append(make("div", "task-detail-label", "错误"));
+        body.append(make("div", "task-detail-value error", task.error));
+      }
+      if (task.output_available) {
+        body.append(make("div", "task-detail-label", "生成图片"));
+        const wrap = make("div", "preview-wrap");
+        wrap.append(make("p", "muted", "正在加载预览…"));
+        body.append(wrap);
+        try {
+          const thumb = await request("query", "task_thumbnail", {task_id: taskId});
+          wrap.replaceChildren();
+          if (thumb.image) {
+            const image = make("img");
+            image.src = thumb.image;
+            image.alt = `任务 #${taskId} 的生成图片`;
+            wrap.append(image);
+          } else {
+            wrap.append(make("p", "preview-missing", thumb.error || "没有可预览的图片"));
+          }
+        } catch (error) {
+          wrap.replaceChildren(make("p", "preview-missing", error.message || String(error)));
+        }
+      }
+      modalBody.replaceChildren(body);
+    } catch (error) {
+      modalBody.replaceChildren(make("p", "error", error.message || String(error)));
+    }
+  }
+
+  async function cancelTask(taskId) {
+    if (!window.confirm(`确认取消排队中的任务 #${taskId}？`)) return;
+    try {
+      const result = await request("action", "cancel_task", {task_id: taskId});
+      if (result.error) throw new Error(result.error);
+      setTaskStatus("#current-status", `任务 #${taskId} 已取消`);
+      await loadCurrentTasks();
+    } catch (error) {
+      setTaskStatus("#current-status", error.message || String(error), true);
+    }
+  }
+
+  async function retryTask(taskId) {
+    try {
+      const result = await request("action", "retry_task", {task_id: taskId});
+      if (result.error) throw new Error(result.error);
+      setTaskStatus("#history-status", `已重新提交为任务 #${result.task_id}`);
+      await loadTaskHistory(historyPage);
+      await loadCurrentTasks();
+    } catch (error) {
+      setTaskStatus("#history-status", error.message || String(error), true);
+    }
+  }
+
+  async function deleteSelectedTasks() {
+    const ids = [...historySelected];
+    if (!ids.length) {
+      setTaskStatus("#history-status", "先勾选要删除的历史任务", true);
+      return;
+    }
+    if (!window.confirm(`确认删除 ${ids.length} 个历史任务及其文件？`)) return;
+    try {
+      const result = await request("action", "delete_tasks", {ids_json: JSON.stringify(ids)});
+      if (result.error) throw new Error(result.error);
+      setTaskStatus("#history-status", `已删除 ${result.deleted} 个历史任务`);
+      await loadTaskHistory(historyPage);
+    } catch (error) {
+      setTaskStatus("#history-status", error.message || String(error), true);
+    }
+  }
+
+  async function retrySelectedTasks() {
+    const ids = [...historySelected];
+    if (!ids.length) {
+      setTaskStatus("#history-status", "先勾选要重试的历史任务", true);
+      return;
+    }
+    let succeeded = 0;
+    for (const taskId of ids) {
+      try {
+        const result = await request("action", "retry_task", {task_id: taskId});
+        if (!result.error) succeeded += 1;
+      } catch (_) {
+        // 单个任务失败不阻断其余选择。
+      }
+    }
+    setTaskStatus("#history-status", `已重新提交 ${succeeded} / ${ids.length} 个任务`);
+    await loadTaskHistory(historyPage);
+    await loadCurrentTasks();
+  }
+
   for (const button of moduleButtons) {
     button.addEventListener("click", () => activateModule(button.dataset.module));
   }
   document.querySelector("#settings-save").addEventListener("click", saveSettings);
+  document.querySelector("#api-save").addEventListener("click", saveDrawingApi);
+  document.querySelector("#api-models").addEventListener("click", fetchDrawingModels);
+  document.querySelector("#current-refresh").addEventListener("click", () => void loadCurrentTasks());
+  document.querySelector("#history-refresh").addEventListener("click", () => void loadTaskHistory(1));
+  document.querySelector("#history-status-filter").addEventListener("change", () => void loadTaskHistory(1));
+  document.querySelector("#history-query").addEventListener("input", () => {
+    window.clearTimeout(historySearchTimer);
+    historySearchTimer = window.setTimeout(() => void loadTaskHistory(1), 300);
+  });
+  document.querySelector("#history-prev").addEventListener("click", () => {
+    if (historyPage > 1) void loadTaskHistory(historyPage - 1);
+  });
+  document.querySelector("#history-next").addEventListener("click", () => {
+    if (historyPage < historyPages) void loadTaskHistory(historyPage + 1);
+  });
+  document.querySelector("#history-retry").addEventListener("click", () => void retrySelectedTasks());
+  document.querySelector("#history-delete").addEventListener("click", () => void deleteSelectedTasks());
+  window.setInterval(() => {
+    if (!document.querySelector("#module-draw").hidden) void loadCurrentTasks();
+  }, 5000);
+  document.querySelector("#api-model").addEventListener("focus", () => openModelMenu());
+  document.querySelector("#api-model").addEventListener("click", () => openModelMenu());
+  document.querySelector("#api-model").addEventListener("input", event => openModelMenu(event.target.value));
+  document.querySelector("#api-size").addEventListener("focus", () => openSizeMenu());
+  document.querySelector("#api-size").addEventListener("click", () => openSizeMenu());
+  document.querySelector("#api-size").addEventListener("input", event => openSizeMenu(event.target.value));
+  document.querySelector("#api-model-toggle").addEventListener("click", () => {
+    const menu = document.querySelector("#api-model-menu");
+    if (menu.hidden) openModelMenu();
+    else closeModelMenu();
+  });
+  document.querySelector("#api-size-toggle").addEventListener("click", () => {
+    const menu = document.querySelector("#api-size-menu");
+    if (menu.hidden) openSizeMenu();
+    else closeSizeMenu();
+  });
+  document.addEventListener("click", event => {
+    const modelBox = document.querySelector("#api-model").closest(".model-combobox");
+    const sizeBox = document.querySelector("#api-size").closest(".model-combobox");
+    if (modelBox && !modelBox.contains(event.target)) closeModelMenu();
+    if (sizeBox && !sizeBox.contains(event.target)) closeSizeMenu();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      closeModelMenu();
+      closeSizeMenu();
+    }
+  });
 
   async function start() {
     try {

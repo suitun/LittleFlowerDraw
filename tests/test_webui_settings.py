@@ -28,15 +28,20 @@ class WebUISettingsTests(unittest.TestCase):
     def test_default_policies_fill_all_registered_commands(self) -> None:
         settings = webui_settings.WebUISettings()
 
-        self.assertEqual([policy.command for policy in settings.commands.policies], ["登记角色", "查看角色"])
+        self.assertEqual(
+            [policy.command for policy in settings.commands.policies],
+            ["登记角色", "查看角色", "单角色替换", "双角色替换", "多人替换"],
+        )
         self.assertEqual(settings.access.admin_qq, "2685275264")
         self.assertFalse(settings.access.whitelist_enabled)
+        self.assertEqual(settings.drawing.min_group_roles, 3)
+        self.assertEqual(settings.drawing.max_group_roles, 8)
 
     def test_command_policies_fill_missing_and_reject_duplicates(self) -> None:
         config = webui_settings.CommandPolicyConfig(
             policies=[{"command": "登记角色", "permission": "仅管理员", "limit": 2, "reset_days": 2}]
         )
-        self.assertEqual(len(config.policies), 2)
+        self.assertEqual(len(config.policies), 5)
         register = next(policy for policy in config.policies if policy.command == "登记角色")
         self.assertEqual((register.permission, register.limit, register.reset_days), ("仅管理员", 2, 2))
 
@@ -102,6 +107,17 @@ reset_days = 1
 
 [guard_replies]
 admin_only = "旧配置提示"
+
+[keywords]
+register_templates = ["记住 {角色名}"]
+
+[replies]
+registered = "记住{角色名}啦"
+
+[library]
+max_name_length = 20
+max_image_mb = 4
+max_pixels = 1000
 """,
             encoding="utf-8",
         )
@@ -115,7 +131,30 @@ admin_only = "旧配置提示"
         self.assertTrue(migrated.access.whitelist_enabled)
         self.assertEqual(migrated.commands.policies[0].limit, 3)
         self.assertEqual(migrated.guard_replies.admin_only, "旧配置提示")
+        self.assertEqual(migrated.keywords.register_templates, ["记住 {角色名}"])
+        self.assertEqual(migrated.replies.registered, "记住{角色名}啦")
+        self.assertEqual(migrated.library.max_name_length, 20)
         self.assertEqual(json.loads(store.path.read_text(encoding="utf-8"))["access"]["admin_qq"], "2685275264")
+
+    def test_existing_settings_file_merges_new_groups_from_legacy(self) -> None:
+        store = webui_settings.WebUISettingsStore(self.data_dir)
+        store.load()
+        old_data = json.loads(store.path.read_text(encoding="utf-8"))
+        for key in ("keywords", "replies", "library"):
+            old_data.pop(key)
+        store.path.write_text(json.dumps(old_data), encoding="utf-8")
+
+        legacy = {
+            "keywords": {"register_templates": ["记住 {角色名}"], "view_templates": ["看看{角色名}"]},
+            "replies": {"registered": "记住啦"},
+            "library": {"max_name_length": 30, "max_image_mb": 5, "max_pixels": 2000},
+        }
+        migrated = webui_settings.WebUISettingsStore(self.data_dir).load(legacy)
+
+        self.assertEqual(migrated.keywords.view_templates, ["看看{角色名}"])
+        self.assertEqual(migrated.replies.registered, "记住啦")
+        self.assertEqual(migrated.library.max_image_mb, 5)
+        self.assertEqual(migrated.access.admin_qq, "2685275264")
 
     def test_guard_reply_placeholders_are_limited_and_rendered(self) -> None:
         text = role_patterns.render_guard_reply("「{指令}」用完啦，{重置时间}再来喵～", "登记角色", "明天 0 点后")

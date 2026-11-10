@@ -4,6 +4,7 @@
 /data/
 /temp/
 /logs/
+/drawings/
 .env
 .env.*
 __pycache__/

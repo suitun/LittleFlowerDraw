@@ -1,7 +1,7 @@
 """由 WebUI 管理的插件设置，独立于 config.toml。"""
 
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import json
 import re
@@ -12,7 +12,17 @@ from maibot_sdk import Field, PluginConfigBase
 from pydantic import field_validator, model_validator
 
 from .command_registry import COMMAND_IDS, COMMAND_SPECS
-from .role_patterns import validate_guard_reply
+from .drawing_patterns import validate_templates as validate_drawing_templates
+from .role_patterns import (
+    validate_drawing_count_reply,
+    validate_drawing_error_reply,
+    validate_drawing_reply,
+    validate_guard_reply,
+    validate_reply,
+    validate_task_fail_reply,
+    validate_task_reply,
+)
+from .settings import KeywordConfig, LibraryConfig, ReplyConfig
 
 
 CommandId = Literal.__getitem__(COMMAND_IDS)
@@ -111,30 +121,202 @@ class CommandPolicyConfig(PluginConfigBase):
         return self
 
 
+class DrawingConfig(PluginConfigBase):
+    replace_templates: List[str] = Field(
+        default_factory=lambda: ["变{角色名} {额外提示词}", "{角色名}穿 {额外提示词}"],
+        description="单角色替换触发模板，每行一条；必须包含 {角色名}，可选 {额外提示词}。",
+    )
+    together_templates: List[str] = Field(
+        default_factory=lambda: ["{角色名1}{角色名2}一起穿 {额外提示词}"],
+        description="双角色替换触发模板，每行一条；必须包含 {角色名1}{角色名2}，可选 {额外提示词}。",
+    )
+    group_templates: List[str] = Field(
+        default_factory=lambda: ["多人穿{角色名列表} {额外提示词}"],
+        description="多人替换触发模板，每行一条；必须包含 {角色名列表}，角色用 @ 分隔。",
+    )
+    replace_prompt: str = Field(
+        default="把图1中的角色替换为图2中的角色，保持姿势、构图、背景和其他人物不变。",
+        max_length=8000,
+        description="单角色替换的基础提示词，额外提示词会接在后面。",
+    )
+    together_prompt: str = Field(
+        default="把图1中的两个角色分别替换为图2和图3中的角色，保持姿势、构图、背景和其他人物不变。",
+        max_length=8000,
+        description="双角色替换的基础提示词。",
+    )
+    group_prompt: str = Field(
+        default="把图1中的角色依次替换为后续图片中的角色，保持姿势、构图、背景和其他人物不变。",
+        max_length=8000,
+        description="多人替换的基础提示词。",
+    )
+    min_group_roles: int = Field(default=3, ge=3, le=8, description="多人替换最少角色数。")
+    max_group_roles: int = Field(default=8, ge=3, le=8, description="多人替换最多角色数。")
+    missing_reference_reply: str = Field(
+        default="画图需要一张参考图哦，请附图或引用一条有图的消息喵～",
+        max_length=2000,
+        description="绘图消息没有参考图时的回复。",
+    )
+    missing_role_reply: str = Field(
+        default="小花还不认识「{角色名}」呢，先把 TA 登记进角色库吧喵～",
+        max_length=2000,
+        description="绘图引用的角色不存在时的回复。",
+    )
+    group_count_reply: str = Field(
+        default="多人替换需要 {最少}-{最多} 个角色喵～",
+        max_length=2000,
+        description="多人替换角色数量超出范围时的回复。",
+    )
+    api_missing_reply: str = Field(
+        default="绘图 API 还没配置好，请先在「小花绘 → 绘图 API」填写 URL 和 Token 喵～",
+        max_length=2000,
+        description="绘图 API 未配置时的回复。",
+    )
+    api_error_reply: str = Field(
+        default="绘图 API 调用失败：{错误}",
+        max_length=2000,
+        description="绘图 API 调用失败时的回复，支持 {错误}。",
+    )
+    success_reply: str = Field(
+        default="小花画好啦喵～类型：{类型}；角色：{角色数量} 个。",
+        max_length=2000,
+        description="绘图成功时的回复，支持 {类型}、{角色数量}。",
+    )
+    submitted_reply: str = Field(
+        default="任务 #{任务ID} 收到啦喵～前面还有 {排队数} 个。",
+        max_length=2000,
+        description="任务入队后的回复，支持 {任务ID}、{排队数}。",
+    )
+    active_task_reply: str = Field(
+        default="你还有任务 #{任务ID} 在画喵～等它完成再来吧。",
+        max_length=2000,
+        description="用户已有进行中任务时的回复，支持 {任务ID}。",
+    )
+    queue_full_reply: str = Field(
+        default="排队的小花太多啦，稍后再来喵～",
+        max_length=2000,
+        description="任务队列已满时的回复。",
+    )
+    duplicate_task_reply: str = Field(
+        default="这个任务已经提交过啦喵～",
+        max_length=2000,
+        description="重复消息再次提交任务时的回复。",
+    )
+    task_failed_reply: str = Field(
+        default="任务 #{任务ID} 画失败了喵…{错误}",
+        max_length=2000,
+        description="任务失败时的回复，支持 {任务ID}、{错误}。",
+    )
+
+    @field_validator("replace_templates")
+    @classmethod
+    def validate_replace_templates(cls, values: List[str]) -> List[str]:
+        validate_drawing_templates(values, "replace")
+        return values
+
+    @field_validator("together_templates")
+    @classmethod
+    def validate_together_templates(cls, values: List[str]) -> List[str]:
+        validate_drawing_templates(values, "together")
+        return values
+
+    @field_validator("group_templates")
+    @classmethod
+    def validate_group_templates(cls, values: List[str]) -> List[str]:
+        validate_drawing_templates(values, "group")
+        return values
+
+    @field_validator("missing_role_reply")
+    @classmethod
+    def validate_missing_role(cls, value: str) -> str:
+        return validate_reply(value)
+
+    @field_validator("group_count_reply")
+    @classmethod
+    def validate_group_count(cls, value: str) -> str:
+        return validate_drawing_count_reply(value)
+
+    @field_validator("api_missing_reply")
+    @classmethod
+    def validate_api_missing(cls, value: str) -> str:
+        return validate_reply(value)
+
+    @field_validator("api_error_reply")
+    @classmethod
+    def validate_api_error(cls, value: str) -> str:
+        return validate_drawing_error_reply(value)
+
+    @field_validator("success_reply")
+    @classmethod
+    def validate_success(cls, value: str) -> str:
+        return validate_drawing_reply(value)
+
+    @field_validator("submitted_reply", "active_task_reply")
+    @classmethod
+    def validate_task_template(cls, value: str) -> str:
+        return validate_task_reply(value)
+
+    @field_validator("queue_full_reply")
+    @classmethod
+    def validate_queue_full(cls, value: str) -> str:
+        return validate_reply(value)
+
+    @field_validator("duplicate_task_reply")
+    @classmethod
+    def validate_duplicate_task(cls, value: str) -> str:
+        return validate_reply(value)
+
+    @field_validator("task_failed_reply")
+    @classmethod
+    def validate_task_failed(cls, value: str) -> str:
+        return validate_task_fail_reply(value)
+
+    @field_validator("missing_reference_reply")
+    @classmethod
+    def validate_missing_reference(cls, value: str) -> str:
+        return validate_reply(value)
+
+    @model_validator(mode="after")
+    def validate_group_range(self) -> "DrawingConfig":
+        if self.min_group_roles > self.max_group_roles:
+            raise ValueError("多人替换的最少角色数不能大于最多角色数")
+        return self
+
+
+class TaskQueueConfig(PluginConfigBase):
+    max_concurrent_tasks: int = Field(default=1, ge=1, le=8, description="同时执行的绘图任务数")
+    max_waiting_tasks: int = Field(default=20, ge=0, le=1000, description="最多排队任务数，0 表示不限")
+    task_timeout_seconds: int = Field(default=600, ge=30, le=3600, description="单个任务执行超时秒数")
+    poll_interval_seconds: int = Field(default=2, ge=1, le=60, description="队列轮询间隔秒数")
+    history_retention_days: int = Field(default=30, ge=0, le=3650, description="历史元数据保留天数，0 表示不自动清理")
+    output_retention_days: int = Field(default=30, ge=0, le=3650, description="生成图片保留天数，0 表示不自动清理")
+    queue_paused: bool = Field(default=False, description="暂停领取新任务；当前执行中的任务继续完成")
+
+
 class WebUISettings(PluginConfigBase):
     """WebUI 设置文件的结构；后续绘图模块可以继续在这里扩展。"""
 
+    keywords: KeywordConfig = Field(default_factory=KeywordConfig)
+    replies: ReplyConfig = Field(default_factory=ReplyConfig)
+    library: LibraryConfig = Field(default_factory=LibraryConfig)
+    drawing: DrawingConfig = Field(default_factory=DrawingConfig)
+    task_queue: TaskQueueConfig = Field(default_factory=TaskQueueConfig)
     access: AccessConfig = Field(default_factory=AccessConfig)
     commands: CommandPolicyConfig = Field(default_factory=CommandPolicyConfig)
     guard_replies: GuardReplyConfig = Field(default_factory=GuardReplyConfig)
 
 
-def load_legacy_settings(config_path: Path) -> Optional[WebUISettings]:
+def load_legacy_settings(config_path: Path) -> Optional[Dict[str, Any]]:
     """从旧版 config.toml 读取曾经放在插件配置里的设置。"""
     if not config_path.is_file():
         return None
     with config_path.open("rb") as stream:
         raw = tomllib.load(stream)
-    sections = {key: raw[key] for key in ("access", "commands", "guard_replies") if key in raw}
-    if not sections:
-        return None
-    return WebUISettings.model_validate(
-        {
-            "access": sections.get("access", {}),
-            "commands": sections.get("commands", {}),
-            "guard_replies": sections.get("guard_replies", {}),
-        }
-    )
+    sections = {
+        key: raw[key]
+        for key in ("keywords", "replies", "library", "drawing", "task_queue", "access", "commands", "guard_replies")
+        if key in raw
+    }
+    return sections or None
 
 
 class WebUISettingsStore:
@@ -149,13 +331,23 @@ class WebUISettingsStore:
         self._lock = threading.Lock()
         self._settings: Optional[WebUISettings] = None
 
-    def load(self, legacy: Optional[WebUISettings] = None) -> WebUISettings:
+    def load(self, legacy: Optional[Dict[str, Any]] = None) -> WebUISettings:
         with self._lock:
             if self.path.is_file():
                 data = json.loads(self.path.read_text(encoding="utf-8"))
+                changed = False
+                if legacy:
+                    for key, value in legacy.items():
+                        if key not in data:
+                            data[key] = value
+                            changed = True
                 settings = WebUISettings.model_validate(data)
+                if not changed and data != settings.model_dump(mode="json"):
+                    changed = True
+                if changed:
+                    self._write(settings)
             else:
-                settings = legacy if legacy is not None else WebUISettings()
+                settings = WebUISettings.model_validate(legacy or {})
                 self._write(settings)
             self._settings = settings
             return settings.model_copy(deep=True)

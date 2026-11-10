@@ -14,7 +14,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_order__ = 0
 
     enabled: bool = Field(default=False, description="是否启用小花绘")
-    config_version: str = Field(default="0.5.0", description="配置结构版本")
+    config_version: str = Field(default="0.6.0", description="配置结构版本")
 
 
 class KeywordConfig(PluginConfigBase):
@@ -70,6 +70,3 @@ class LibraryConfig(PluginConfigBase):
 
 class LittleFlowerDrawConfig(PluginConfigBase):
     plugin: PluginSectionConfig = Field(default_factory=PluginSectionConfig)
-    keywords: KeywordConfig = Field(default_factory=KeywordConfig)
-    replies: ReplyConfig = Field(default_factory=ReplyConfig)
-    library: LibraryConfig = Field(default_factory=LibraryConfig)

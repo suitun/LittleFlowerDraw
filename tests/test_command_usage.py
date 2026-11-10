@@ -65,6 +65,27 @@ class CommandUsageStoreTests(unittest.TestCase):
             rows = connection.execute("SELECT COUNT(*) FROM command_usage").fetchone()[0]
         self.assertEqual(rows, 0)
 
+    def test_refund_once_restores_used_in_same_window(self) -> None:
+        now = local_timestamp(10, 12)
+        with patch("command_usage.time.time", return_value=now):
+            window = self.store.record_success("user", "登记角色", 2, 1)
+            self.assertEqual(self.store.check("user", "登记角色", 2, 1).used, 1)
+
+            self.assertTrue(self.store.refund_once(42, "user", "登记角色", window))
+            self.assertEqual(self.store.check("user", "登记角色", 2, 1).used, 0)
+            self.assertFalse(self.store.refund_once(42, "user", "登记角色", window))
+            self.assertEqual(self.store.check("user", "登记角色", 2, 1).used, 0)
+
+    def test_refund_does_not_touch_a_new_window(self) -> None:
+        first_day = local_timestamp(10, 23)
+        with patch("command_usage.time.time", return_value=first_day):
+            old_window = self.store.record_success("user", "登记角色", 2, 1)
+        next_day = local_timestamp(11, 12)
+        with patch("command_usage.time.time", return_value=next_day):
+            self.store.record_success("user", "登记角色", 2, 1)
+            self.store.refund_once(43, "user", "登记角色", old_window)
+            self.assertEqual(self.store.check("user", "登记角色", 2, 1).used, 1)
+
     def test_usage_survives_reopening(self) -> None:
         now = local_timestamp(10, 12)
         with patch("command_usage.time.time", return_value=now):
