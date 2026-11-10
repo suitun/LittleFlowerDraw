@@ -1,0 +1,29 @@
+{
+  "manifest_version": 2,
+  "id": "suitun.little-flower-draw",
+  "version": "0.1.0",
+  "name": "LittleFlowerDraw",
+  "description": "用于 QQ 群互动绘画的 MaiBot 插件，目前提供基础配置和状态检查命令。",
+  "author": {
+    "name": "suitun",
+    "url": "https://github.com/suitun"
+  },
+  "license": "LicenseRef-Proprietary",
+  "urls": {
+    "repository": "https://github.com/suitun/LittleFlowerDraw"
+  },
+  "host_application": {
+    "min_version": "1.4.3",
+    "max_version": "1.4.99"
+  },
+  "sdk": {
+    "min_version": "2.22.1",
+    "max_version": "2.22.99"
+  },
+  "dependencies": [],
+  "plugin_type": "game",
+  "capabilities": ["send.text"],
+  "i18n": {
+    "default_locale": "zh-CN"
+  }
+}
