@@ -50,6 +50,7 @@ class FakeHostRPC:
         self.history: Dict[str, Dict[str, Any]] = {}
         self.fail_text_sends = 0
         self.fail_image_sends = 0
+        self.fail_hybrid_sends = 0
 
     @staticmethod
     def session(group_id: str = "10001", user_id: str = "20001") -> str:
@@ -79,6 +80,9 @@ class FakeHostRPC:
             self.image_streams.append(args["stream_id"])
             return {"success": True}
         if capability == "send.hybrid":
+            if self.fail_hybrid_sends:
+                self.fail_hybrid_sends -= 1
+                return {"success": False}
             for segment in args["segments"]:
                 if segment["type"] == "text":
                     self.texts.append(segment["data"])
@@ -99,7 +103,9 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temporary = TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temporary.cleanup)
-        self._random_pick = patch("role_patterns.random.choice", side_effect=lambda values: values[0])
+        self._random_pick = patch(
+            f"{MODULE_NAME}.role_patterns.random.choice", side_effect=lambda values: values[0]
+        )
         self._random_pick.start()
         self.addCleanup(self._random_pick.stop)
         self.rpc = FakeHostRPC()
@@ -121,10 +127,12 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     def message(
         self, text: str, images: Optional[List[bytes]] = None, *, group: str = "10001",
-        user: str = "20001", message_id: str = "", reply_to: str = "",
+        user: str = "20001", message_id: str = "", reply_to: str = "", at: str = "",
     ) -> Dict[str, Any]:
         self.message_number += 1
         segments: List[Dict[str, Any]] = []
+        if at:
+            segments.append({"type": "at", "data": {"target_user_id": at}})
         if reply_to:
             segments.append({"type": "reply", "data": {"target_message_id": reply_to}})
         segments.append({"type": "text", "data": text})
@@ -258,6 +266,29 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.submit(self.message("小花小花我要看紫花"))
         self.assertEqual(self.rpc.images, [image])
 
+    async def test_help_command_returns_a_generated_image(self) -> None:
+        self.clear_output()
+        result = await self.submit(self.message("小花绘帮助"))
+        self.assertEqual(result["action"], "abort")
+        self.assertEqual(self.rpc.texts, [])
+        self.assertEqual(len(self.rpc.images), 1)
+        self.assertTrue(self.rpc.images[0].startswith(b"\x89PNG\r\n\x1a\n"))
+
+    async def test_list_command_returns_count_and_all_names(self) -> None:
+        settings = self.plugin._settings_store.current()
+        self.clear_output()
+        await self.submit(self.message("小花记得谁"))
+        self.assertEqual(self.rpc.texts, [PLUGIN_MODULE.pick_reply(settings.replies.list_empty_reply)])
+
+        await self.submit(self.message("小花小花这是 角色B", [png("red")]))
+        await self.submit(self.message("小花小花这是 角色A", [png("blue")]))
+        self.clear_output()
+        await self.submit(self.message("小花记得谁"))
+        self.assertEqual(
+            self.rpc.texts,
+            [PLUGIN_MODULE.render_list_reply(settings.replies.list_reply, 2, "角色A、角色B")],
+        )
+
     async def test_missing_or_invalid_images_do_not_report_success_or_create_a_role(self) -> None:
         for name, images, reply_to, reply_field in (
             ("无图", [], "", "missing_image"),
@@ -307,6 +338,20 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.submit(self.message("小花小花这是 BMP", [bmp.getvalue()]))
         self.assertEqual(self.rpc.texts, ["格式是BMP喵"])
 
+    async def test_at_prefixed_template_requires_a_bot_mention(self) -> None:
+        settings = self.plugin._settings_store.current()
+        settings.keywords.register_templates = ["@小花小花这是 {角色名}"]
+        self.plugin._settings_store.save(settings)
+        self.clear_output()
+
+        ignored = await self.submit(self.message("小花小花这是 必须艾特", [png("red")]))
+        self.assertEqual(ignored["action"], "continue")
+        self.assertFalse(self.rpc.calls)
+
+        accepted = await self.submit(self.message("小花小花这是 必须艾特", [png("red")], at="99999"))
+        self.assertEqual(accepted["action"], "abort")
+        self.assertIn("必须艾特", self.plugin._store.list_names(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE))
+
     async def test_hot_config_changes_both_matching_and_replies_without_reloading(self) -> None:
         image = png("yellow")
         await self.submit(self.message("小花小花这是 原角色", [image]))
@@ -349,6 +394,32 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["action"], "continue")
         self.assertFalse(self.rpc.calls)
 
+    async def test_view_reply_merges_image_and_supports_optional_at(self) -> None:
+        image = png("pink")
+        await self.submit(self.message("小花小花这是 合并角色", [image]))
+        self.clear_output()
+
+        await self.submit(self.message("小花小花我要看合并角色"))
+        self.assertEqual(self.rpc.images, [image])
+        self.assertEqual(self.rpc.at_targets, [])
+        hybrid = [call for call in self.rpc.calls if call["capability"] == "send.hybrid"]
+        self.assertEqual(len(hybrid), 1)
+        self.assertEqual([segment["type"] for segment in hybrid[0]["args"]["segments"]], ["text", "image"])
+
+        settings = self.plugin._settings_store.current()
+        settings.replies.at_replies = ["view"]
+        self.plugin._settings_store.save(settings)
+        self.clear_output()
+        await self.submit(self.message("小花小花我要看合并角色"))
+        self.assertEqual(self.rpc.images, [image])
+        self.assertEqual(self.rpc.at_targets, ["20001"])
+        hybrid = [call for call in self.rpc.calls if call["capability"] == "send.hybrid"]
+        self.assertEqual(len(hybrid), 1)
+        self.assertEqual(
+            [segment["type"] for segment in hybrid[0]["args"]["segments"]],
+            ["at", "text", "image"],
+        )
+
     async def test_equal_message_ids_in_different_chats_are_not_duplicates(self) -> None:
         await self.submit(self.message("小花小花这是 跨群", [png("red")], group="111", message_id="local-id"))
         await self.submit(self.message("小花小花这是 跨群", [png("blue")], group="222", message_id="local-id"))
@@ -390,10 +461,10 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_image_send_is_logged_and_gets_an_error_reply(self) -> None:
         await self.submit(self.message("小花小花这是 红花", [png("red")]))
         self.clear_output()
-        self.rpc.fail_image_sends = 1
+        self.rpc.fail_hybrid_sends = 1
         with self.assertLogs(self.plugin.ctx.logger, level="ERROR") as logs:
             await self.submit(self.message("小花小花我要看红花"))
-        self.assertIn("角色图片发送失败", "\n".join(logs.output))
+        self.assertIn("角色回复图文消息发送失败", "\n".join(logs.output))
         self.assertEqual(self.rpc.texts[-1], self.reply("error"))
         self.assertFalse(self.rpc.images)
 
@@ -422,6 +493,9 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         for name in ("角色A", "角色B", "角色C"):
             await self.submit(self.message(f"小花小花这是 {name}", [png("red")]))
         self.set_drawing_api()
+        settings = self.plugin._settings_store.current()
+        settings.drawing.at_replies = ["completion_reply"]
+        self.plugin._settings_store.save(settings)
         generated = png("blue")
         output = Path(self.temporary.name) / "generated.png"
 
@@ -474,6 +548,26 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(self.rpc.images, [generated])
             self.assertEqual(self.rpc.at_targets, ["20001"])
+
+    async def test_private_completion_omits_at_and_still_succeeds(self) -> None:
+        await self.submit(self.message("小花小花这是 私聊角色", [png("red")], group=""))
+        self.set_drawing_api()
+        settings = self.plugin._settings_store.current()
+        settings.drawing.at_replies = ["completion_reply"]
+        self.plugin._settings_store.save(settings)
+        generated = png("blue")
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate",
+            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
+        ), patch.object(PLUGIN_MODULE.LittleFlowerDrawPlugin, "_save_drawing_image", return_value=Path(self.temporary.name) / "private.png"):
+            self.clear_output()
+            await self.submit(self.message("变私聊角色 红色外套", [png("white")], group=""))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+        self.assertEqual(finished.status, "succeeded")
+        self.assertEqual(self.rpc.images, [generated])
+        self.assertEqual(self.rpc.at_targets, [])
 
     async def test_webui_drawing_models_queries_configured_endpoint(self) -> None:
         with patch.object(PLUGIN_MODULE, "fetch_models", return_value=["gpt-image-1", "flux-image"]):
@@ -628,6 +722,33 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 PLUGIN_MODULE.render_task_fail_reply(drawing.task_failed_reply, task.id, "上游失败"),
             ],
         )
+
+    async def test_api_400_uses_short_image_rejected_reply(self) -> None:
+        await self.submit(self.message("小花小花这是 不合规角色", [png("red")]))
+        self.set_drawing_api()
+        self.clear_output()
+        long_detail = "上游返回了很长的错误详情" * 100
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate",
+            side_effect=PLUGIN_MODULE.DrawingApiError(long_detail, status_code=400),
+        ):
+            await self.submit(self.message("变不合规角色 红色外套", [png("white")]))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+            for _ in range(100):
+                if len(self.rpc.texts) >= 2:
+                    break
+                await asyncio.sleep(0.02)
+        self.assertEqual(finished.status, "failed")
+        self.assertEqual(finished.error, "图片不符合接口要求")
+        self.assertEqual(
+            self.rpc.texts[-1],
+            PLUGIN_MODULE.render_task_reply(
+                self.plugin._settings_store.current().drawing.image_rejected_reply, task.id
+            ),
+        )
+        self.assertNotIn("很长的错误详情", self.rpc.texts[-1])
 
     async def test_drawing_rejects_missing_reference_missing_role_and_bad_group_count(self) -> None:
         await self.submit(self.message("小花小花这是 角色A", [png("red")]))

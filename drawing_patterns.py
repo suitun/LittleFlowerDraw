@@ -5,6 +5,8 @@ from typing import List, Optional, Set, Tuple
 
 import re
 
+from .trigger_syntax import normalize_template_key, split_mention_requirement
+
 
 EXTRA_FIELD = "{额外提示词}"
 ROLE_FIELD = "{角色名}"
@@ -63,6 +65,7 @@ def _optional_extra(has_extra: bool) -> str:
 
 
 def _compile(template: str, kind: str) -> re.Pattern[str]:
+    _, template = split_mention_requirement(template)
     if kind == "replace":
         _validate_placeholders(template, {"角色名", "额外提示词"})
         if template.count(ROLE_FIELD) != 1:
@@ -118,22 +121,27 @@ def match_drawing_request(
     replace_templates: List[str],
     together_templates: List[str],
     group_templates: List[str],
+    *,
+    mentioned_bot: bool = False,
 ) -> Optional[DrawingCandidate]:
     """按模板字面长度优先匹配，避免短别名截获更长模板。"""
     rules = [
-        (len(template), "replace", template)
+        (len(normalize_template_key(template)), "replace", template)
         for template in replace_templates
     ] + [
-        (len(template), "together", template)
+        (len(normalize_template_key(template)), "together", template)
         for template in together_templates
     ] + [
-        (len(template), "group", template)
+        (len(normalize_template_key(template)), "group", template)
         for template in group_templates
     ]
     rules.sort(key=lambda item: item[0], reverse=True)
     normalized = text.strip()
     for _, kind, template in rules:
-        match = _compile(template, kind).fullmatch(normalized)
+        requires_at, body = split_mention_requirement(template)
+        if requires_at and not mentioned_bot:
+            continue
+        match = _compile(body, kind).fullmatch(normalized)
         if match is not None:
             return _candidate(match, kind)
     return None

@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 from PIL import Image
 
@@ -117,6 +118,20 @@ class DrawingApiTests(unittest.TestCase):
         with patch("drawing_api.urlopen", return_value=response) as mocked:
             OpenAIImageClient().generate(config, "换装", [png(900, 1600)])
         self.assertIn(b'name="size"\r\n\r\n1024x1536', mocked.call_args.args[0].data)
+
+    def test_http_400_becomes_short_image_rejected_error(self) -> None:
+        error = HTTPError(
+            "https://relay.test/v1/images/edits",
+            400,
+            "Bad Request",
+            None,
+            BytesIO(b"very long upstream detail"),
+        )
+        config = DrawingApiConfig(base_url="https://relay.test/v1", api_key="secret", model="gpt-image-1")
+        with patch("drawing_api.urlopen", side_effect=error), self.assertRaises(DrawingApiError) as raised:
+            OpenAIImageClient().generate(config, "换装", [png()])
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertNotIn("very long upstream detail", str(raised.exception))
 
     def test_client_requires_configuration(self) -> None:
         with self.assertRaises(DrawingApiError):

@@ -63,6 +63,27 @@ class RolePatternTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             patterns.pick_reply([])
 
+    def test_optional_at_prefix_requires_a_bot_mention(self):
+        templates = ["@小花小花这是 {角色名}"]
+        self.assertIsNone(patterns.match_request("小花小花这是 角色1", templates, []))
+        request = patterns.match_request("小花小花这是 角色1", templates, [], mentioned_bot=True)
+        self.assertEqual((request.action, request.role_name), ("register", "角色1"))
+
+    def test_list_command_matches_without_role_placeholder(self):
+        request = patterns.match_request("小花记得谁", ["小花小花这是 {角色名}"], [], ["小花记得谁"])
+        self.assertEqual((request.action, request.role_name), ("list", ""))
+        self.assertIsNone(patterns.match_request("小花记得谁", ["小花小花这是 {角色名}"], [], []))
+        marked = patterns.match_request("小花记得谁", ["小花小花这是 {角色名}"], [], ["@小花记得谁"])
+        self.assertIsNone(marked)
+        marked = patterns.match_request("小花记得谁", ["小花小花这是 {角色名}"], [], ["@小花记得谁"], mentioned_bot=True)
+        self.assertEqual(marked.action, "list")
+
+    def test_help_command_matches_configured_keyword(self):
+        request = patterns.match_request(
+            "小花绘帮助", ["小花小花这是 {角色名}"], [], ["小花记得谁"], ["小花绘帮助"]
+        )
+        self.assertEqual((request.action, request.role_name), ("help", ""))
+
     def test_plugin_config_only_keeps_core_section(self):
         from maibot_sdk.config import generate_plugin_config_schema
 

@@ -529,13 +529,20 @@ class DrawingTaskStore:
             clauses.append("status = ?")
             parameters.append(status)
         if query:
-            pattern = f"%{_escape_like(query)}%"
-            clauses.append(
-                "(CAST(id AS TEXT) LIKE ? ESCAPE '\\' OR requester_id LIKE ? ESCAPE '\\' "
-                "OR requester_group_name LIKE ? ESCAPE '\\' OR requester_qq_name LIKE ? ESCAPE '\\' "
-                "OR role_names_json LIKE ? ESCAPE '\\' OR command_id LIKE ? ESCAPE '\\')"
-            )
-            parameters.extend([pattern] * 6)
+            normalized = query.strip()
+            if normalized.startswith("#"):
+                normalized = normalized[1:]
+            if normalized.isdigit():
+                clauses.append("(CAST(id AS TEXT) = ? OR requester_id = ?)")
+                parameters.extend([normalized, normalized])
+            else:
+                pattern = f"%{_escape_like(normalized)}%"
+                clauses.append(
+                    "(requester_id LIKE ? ESCAPE '\\' "
+                    "OR requester_group_name LIKE ? ESCAPE '\\' OR requester_qq_name LIKE ? ESCAPE '\\' "
+                    "OR role_names_json LIKE ? ESCAPE '\\' OR command_id LIKE ? ESCAPE '\\')"
+                )
+                parameters.extend([pattern] * 5)
         where = " AND ".join(clauses)
         with self._connection() as connection:
             total = int(
@@ -585,7 +592,11 @@ class DrawingTaskStore:
                 connection.rollback()
                 raise
         for record in records:
-            self._remove_files(record)
+            try:
+                self._remove_files(record)
+            except OSError:
+                # 数据库记录已经删除；残留文件不应让整批删除报告失败。
+                pass
         return len(records)
 
     def purge_history(self, days: int) -> int:

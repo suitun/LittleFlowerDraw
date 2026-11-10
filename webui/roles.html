@@ -78,23 +78,35 @@
     .task-prompt { color: var(--maibot-muted); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .task-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: auto; padding-top: 2px; }
     .task-actions .maibot-button { padding: 4px 9px; font-size: 12.5px; }
+    .task-actions .task-delete { color: var(--maibot-danger); }
     .task-check { display: inline-flex; align-items: center; gap: 5px; color: var(--maibot-muted); font-size: 12px; }
     .task-check input { width: 15px; height: 15px; }
     .task-bulk-actions { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
-    .task-detail-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); gap: 20px; align-items: start; }
-    .task-detail-hero { border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-background); overflow: hidden; display: grid; place-items: center; min-height: 280px; }
-    .task-detail-hero img { width: 100%; max-height: 68vh; object-fit: contain; display: block; }
+    .task-detail-visual { display: flex; flex-direction: column; min-height: 0; }
+    .task-detail-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 20px; align-items: stretch; height: 100%; min-height: 0; }
+    .task-detail-hero { position: relative; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-background); overflow: hidden; display: grid; place-items: center; min-height: 0; height: 100%; flex: 1; }
+    .task-detail-hero img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
     .task-detail-hero .preview-missing { padding: 40px 20px; text-align: center; color: var(--maibot-muted); }
     .task-detail-caption { margin-top: 8px; color: var(--maibot-muted); font-size: 12.5px; }
-    .task-detail-side { display: grid; gap: 14px; min-width: 0; }
+    .task-detail-side { display: grid; gap: 12px; min-width: 0; min-height: 0; overflow: auto; padding-right: 4px; align-content: start; }
     .task-detail-side h3 { margin: 0; font-size: 15px; }
     .meta-list { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 14px; margin: 0; font-size: 13.5px; }
     .meta-list dt { color: var(--maibot-muted); white-space: nowrap; }
     .meta-list dd { margin: 0; overflow-wrap: anywhere; }
     .task-detail-label { color: var(--maibot-muted); font-size: 12.5px; margin-top: 10px; }
     .task-detail-value { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.55; }
-    .task-detail-reference { display: grid; gap: 6px; }
-    .task-detail-reference img { width: 100%; max-height: 180px; object-fit: contain; border: 1px solid var(--maibot-border); border-radius: 8px; background: var(--maibot-background); }
+    .task-detail-prompt { border-top: 1px solid var(--maibot-border); padding-top: 10px; }
+    .task-detail-prompt summary { cursor: pointer; color: var(--maibot-muted); font-size: 12.5px; }
+    .task-detail-reference { display: grid; gap: 6px; justify-items: center; }
+    .task-detail-reference img { width: 100%; height: auto; max-height: 380px; object-fit: contain; border: 1px solid var(--maibot-border); border-radius: 8px; background: var(--maibot-background); }
+    @media (max-width: 900px) {
+      .modal-card.task-modal { height: auto; max-height: 96vh; overflow: auto; }
+      .modal-card.task-modal #modal-body { overflow: visible; }
+      .task-detail-layout { height: auto; grid-template-columns: 1fr; }
+      .task-detail-hero { height: auto; max-height: 52vh; }
+      .task-detail-hero img { max-height: 52vh; height: auto; }
+      .task-detail-side { overflow: visible; }
+    }
     @media (max-width: 760px) {
       .task-list { grid-template-columns: 1fr; }
       .task-card { grid-template-columns: 118px minmax(0, 1fr); }
@@ -109,6 +121,8 @@
     .reply-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
     .reply-card-title { font-weight: 600; }
     .reply-card-hint { color: var(--maibot-muted); font-size: 12px; overflow-wrap: anywhere; }
+    .reply-at { display: inline-flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--maibot-muted); font-size: 12.5px; cursor: pointer; }
+    .reply-at input { width: 15px; height: 15px; }
     .reply-variants { display: grid; gap: 8px; margin-top: 8px; }
     .reply-variant { display: flex; gap: 6px; align-items: flex-start; }
     .reply-variant textarea { flex: 1; min-height: 54px; resize: vertical; font-family: inherit; }
@@ -132,6 +146,9 @@
     .pager { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 20px; }
     .modal { position: fixed; inset: 0; z-index: 50; padding: 20px; background: rgba(0, 0, 0, 0.55); display: grid; place-items: center; overflow: auto; }
     .modal-card { width: min(1120px, 96vw); max-height: 92vh; overflow: auto; padding: 24px; background: var(--maibot-surface); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); }
+    .modal-card.task-modal { width: min(1480px, 96vw); height: min(96vh, 1000px); max-height: 96vh; overflow: hidden; display: flex; flex-direction: column; }
+    .modal-card.task-modal .modal-head { flex: none; }
+    .modal-card.task-modal #modal-body { flex: 1; min-height: 0; overflow: hidden; }
     .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; position: sticky; top: 0; z-index: 2; padding-bottom: 10px; background: var(--maibot-surface); }
     .preview-wrap { display: grid; place-items: center; min-height: 160px; margin-bottom: 14px; background: var(--maibot-background); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); overflow: hidden; }
     .preview-wrap img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; }
@@ -217,8 +234,14 @@
           <label class="settings-field">查看模板（每行一条）
             <textarea id="setting-view-templates" class="maibot-input" rows="3" placeholder="小花小花我要看{角色名}"></textarea>
           </label>
+          <label class="settings-field">角色列表模板（每行一条）
+            <textarea id="setting-list-templates" class="maibot-input" rows="3" placeholder="小花记得谁"></textarea>
+          </label>
+          <label class="settings-field">帮助模板（每行一条）
+            <textarea id="setting-help-templates" class="maibot-input" rows="3" placeholder="小花绘帮助"></textarea>
+          </label>
         </div>
-        <p class="muted">每条模板必须且只能包含一个 {角色名}，角色名前需要固定触发文字。</p>
+        <p class="muted">登记/查看模板必须且只能包含一个 {角色名}，角色列表模板不能带占位符。模板开头加 <code>@</code> 表示必须先 @ 机器人，例如 <code>@小花小花这是 {角色名}</code> 或 <code>@小花记得谁</code>。</p>
       </fieldset>
 
       <fieldset class="settings-card">
@@ -242,7 +265,7 @@
             <textarea id="setting-drawing-group-templates" class="maibot-input" rows="3" placeholder="多人穿{角色名列表} {额外提示词}"></textarea>
           </label>
         </div>
-        <p class="muted">多人替换用 @ 分隔角色，例如 <code>多人穿@角色1@角色2@角色3 换装</code>；{额外提示词} 可省略。</p>
+        <p class="muted">多人替换用 @ 分隔角色，例如 <code>多人穿@角色1@角色2@角色3 换装</code>；{额外提示词} 可省略。模板开头加 <code>@</code> 表示必须先 @ 机器人，例如 <code>@变{角色名} {额外提示词}</code>。</p>
         <div class="settings-grid">
           <label class="settings-field">单角色基础提示词
             <textarea id="setting-drawing-replace-prompt" class="maibot-input" rows="3"></textarea>
@@ -254,6 +277,7 @@
             <textarea id="setting-drawing-group-prompt" class="maibot-input" rows="3"></textarea>
           </label>
         </div>
+        <p class="muted">提示词必须明确图1是底图、后续图片只是角色外观参考。参考图是头像或表情包时，建议「绘图 API → 尺寸」选 <code>reference</code>，避免输出被角色立绘的比例带偏。</p>
         <div class="settings-grid">
           <label class="settings-field">多人最少角色数<input id="setting-drawing-min-roles" class="maibot-input" type="number" min="3" max="8"></label>
           <label class="settings-field">多人最多角色数<input id="setting-drawing-max-roles" class="maibot-input" type="number" min="3" max="8"></label>
@@ -311,7 +335,7 @@
     <div class="module-head">
       <div>
         <h2>回复配置</h2>
-        <p class="muted">按模块管理回复文案；每种回复可以配置多条，触发时随机抽取一条。</p>
+        <p class="muted">按模块管理回复文案；每种回复可以配置多条，触发时随机抽取一条，并可单独开启“回复时 @ 对方”。</p>
       </div>
       <div class="actions">
         <button id="replies-refresh" class="maibot-button" type="button">刷新</button>
@@ -337,6 +361,11 @@
     <p id="current-stats" class="muted">正在加载…</p>
     <p id="current-status" role="status" aria-live="polite"></p>
     <div id="current-list" class="task-list"></div>
+    <nav id="current-pager" class="pager" hidden>
+      <button id="current-prev" class="maibot-button" type="button">上一页</button>
+      <span id="current-page-label" class="muted"></span>
+      <button id="current-next" class="maibot-button" type="button">下一页</button>
+    </nav>
   </section>
 
   <section id="module-history" class="module" hidden>
@@ -352,7 +381,7 @@
           <option value="failed">失败</option>
           <option value="cancelled">已取消</option>
         </select>
-        <input id="history-query" class="maibot-input" type="search" placeholder="任务 ID / QQ / 昵称 / 角色" aria-label="搜索任务">
+        <input id="history-query" class="maibot-input" type="search" placeholder="任务 #编号 / QQ / 昵称 / 角色" aria-label="搜索任务">
         <button id="history-refresh" class="maibot-button" type="button">刷新</button>
       </div>
     </div>
@@ -457,6 +486,7 @@
   const pagerElement = document.querySelector("#pager");
   const pageLabel = document.querySelector("#page-label");
   const modal = document.querySelector("#modal");
+  const modalCard = modal.querySelector(".modal-card");
   const modalTitle = document.querySelector("#modal-title");
   const modalBody = document.querySelector("#modal-body");
   const replaceFile = document.querySelector("#replace-file");
@@ -469,6 +499,10 @@
   let apiLoaded = false;
   let apiModels = [];
   let currentTasksLoading = false;
+  let currentTasksPage = 1;
+  let currentTasksPages = 1;
+  let currentTasksData = [];
+  const CURRENT_PAGE_SIZE = 12;
   let historyPage = 1;
   let historyPages = 1;
   let historySearchTimer = 0;
@@ -730,6 +764,7 @@
 
   function closeModal() {
     modal.hidden = true;
+    modalCard.classList.remove("task-modal");
     modalBody.replaceChildren();
     state.selected = null;
     revokeUploadPreview();
@@ -1036,6 +1071,8 @@
   function fillSettings(settings) {
     document.querySelector("#setting-register-templates").value = settings.keywords.register_templates.join("\n");
     document.querySelector("#setting-view-templates").value = settings.keywords.view_templates.join("\n");
+    document.querySelector("#setting-list-templates").value = settings.keywords.list_templates.join("\n");
+    document.querySelector("#setting-help-templates").value = settings.keywords.help_templates.join("\n");
     document.querySelector("#setting-max-name-length").value = String(settings.library.max_name_length);
     document.querySelector("#setting-max-image-mb").value = String(settings.library.max_image_mb);
     document.querySelector("#setting-drawing-replace-templates").value = settings.drawing.replace_templates.join("\n");
@@ -1088,7 +1125,9 @@
     const payload = {
       keywords: {
         register_templates: parseTemplateList(document.querySelector("#setting-register-templates").value),
-        view_templates: parseTemplateList(document.querySelector("#setting-view-templates").value)
+        view_templates: parseTemplateList(document.querySelector("#setting-view-templates").value),
+        list_templates: parseTemplateList(document.querySelector("#setting-list-templates").value),
+        help_templates: parseTemplateList(document.querySelector("#setting-help-templates").value)
       },
       library: {
         max_name_length: Number(document.querySelector("#setting-max-name-length").value),
@@ -1148,6 +1187,10 @@
         ["registered", "首次登记", "支持 {角色名}"],
         ["overwritten", "同名覆盖", "支持 {角色名}"],
         ["view", "查看前文案", "支持 {角色名}；留空则只发图片"],
+        ["list_reply", "角色列表", "支持 {角色数量}、{角色列表}"],
+        ["list_empty_reply", "角色列表为空", "不需要占位符"],
+        ["help_title", "帮助图片标题", "不需要占位符"],
+        ["help_footer", "帮助图片底部提示", "不需要占位符"],
         ["not_found", "没有找到角色", "支持 {角色名}"],
         ["missing_image", "缺少图片", "支持 {角色名}"],
         ["invalid_name", "名字不合法", "支持 {角色名}"],
@@ -1174,6 +1217,7 @@
         ["api_missing_reply", "API 未配置", "不需要占位符"],
         ["api_error_reply", "API 调用失败", "支持 {错误}"],
         ["task_failed_reply", "任务失败", "支持 {任务ID}、{错误}"],
+        ["image_rejected_reply", "图片不合规（400）", "支持 {任务ID}，接口返回 400 时使用"],
         ["completion_reply", "任务完成", "支持 {任务ID}"]
       ]
     },
@@ -1240,6 +1284,13 @@
         head.append(make("span", "reply-card-title", label));
         head.append(make("span", "reply-card-hint", hint));
         card.append(head);
+        const at = make("label", "reply-at");
+        const atCheckbox = make("input");
+        atCheckbox.type = "checkbox";
+        atCheckbox.checked = Array.isArray(settings[group.source].at_replies)
+          && settings[group.source].at_replies.includes(key);
+        at.append(atCheckbox, document.createTextNode("回复时 @ 对方"));
+        card.append(at);
         const variants = make("div", "reply-variants");
         card.append(variants);
         const values = settings[group.source] && Array.isArray(settings[group.source][key])
@@ -1276,6 +1327,11 @@
     if (!settingsData) await loadReplies();
     if (!settingsData) return;
     const next = structuredClone(settingsData);
+    for (const group of REPLY_GROUPS) {
+      next[group.source].at_replies = [...document.querySelectorAll(`.reply-card[data-source="${group.source}"]`)]
+        .filter(card => card.querySelector(".reply-at input").checked)
+        .map(card => card.dataset.key);
+    }
     for (const card of document.querySelectorAll(".reply-card")) {
       const source = card.dataset.source;
       const key = card.dataset.key;
@@ -1478,6 +1534,27 @@
     return task.requester_group_name || task.requester_qq_name || task.requester_id || "—";
   }
 
+  function formatDuration(seconds) {
+    const total = Math.max(0, Math.floor(seconds));
+    if (total < 60) return `${total} 秒`;
+    if (total < 3600) return `${Math.floor(total / 60)} 分 ${total % 60} 秒`;
+    if (total < 86400) return `${Math.floor(total / 3600)} 小时 ${Math.floor(total % 3600 / 60)} 分`;
+    return `${Math.floor(total / 86400)} 天 ${Math.floor(total % 86400 / 3600)} 小时`;
+  }
+
+  function taskDuration(task) {
+    if (!task.started_at) return "—";
+    const end = task.finished_at || Math.floor(Date.now() / 1000);
+    return formatDuration(end - task.started_at);
+  }
+
+  function taskPromptDetails(label, value) {
+    const details = make("details", "task-detail-prompt");
+    details.append(make("summary", "", label));
+    details.append(make("div", "task-detail-value", value || "—"));
+    return details;
+  }
+
   function taskCard(task, history = false) {
     const card = make("div", "task-card");
     const previewKind = task.output_available ? "output" : task.reference_available ? "reference" : "";
@@ -1533,6 +1610,12 @@
       retryButton.addEventListener("click", () => void retryTask(task.id));
       actions.append(retryButton);
     }
+    if (history) {
+      const deleteButton = make("button", "maibot-button task-delete", "删除");
+      deleteButton.type = "button";
+      deleteButton.addEventListener("click", () => void deleteTask(task.id));
+      actions.append(deleteButton);
+    }
     body.append(head);
 
     const meta = make("div", "task-meta");
@@ -1548,6 +1631,7 @@
 
     const timeline = [`创建：${formatTime(task.created_at)}`];
     if (task.status === "queued" && task.queue_position > 0) timeline.push(`前面还有 ${task.queue_position} 个`);
+    if (task.started_at) timeline.push(`用时：${taskDuration(task)}`);
     if (task.started_at) timeline.push(`开始：${formatTime(task.started_at)}`);
     if (task.finished_at) timeline.push(`结束：${formatTime(task.finished_at)}`);
     body.append(make("div", "task-meta", timeline.join(" · ")));
@@ -1557,25 +1641,40 @@
     return card;
   }
 
+  function renderCurrentTasks() {
+    const list = document.querySelector("#current-list");
+    taskThumbnailObserver.disconnect();
+    list.replaceChildren();
+    const pages = Math.max(1, Math.ceil(currentTasksData.length / CURRENT_PAGE_SIZE));
+    currentTasksPages = pages;
+    currentTasksPage = Math.min(Math.max(1, currentTasksPage), pages);
+    const start = (currentTasksPage - 1) * CURRENT_PAGE_SIZE;
+    const pageTasks = currentTasksData.slice(start, start + CURRENT_PAGE_SIZE);
+    if (!pageTasks.length) {
+      list.append(make("div", "placeholder", "现在没有排队或执行中的任务喵～"));
+    } else {
+      for (const task of pageTasks) list.append(taskCard(task));
+    }
+    const pager = document.querySelector("#current-pager");
+    pager.hidden = pages <= 1;
+    document.querySelector("#current-page-label").textContent = `第 ${currentTasksPage} / ${pages} 页`;
+    document.querySelector("#current-prev").disabled = currentTasksPage <= 1;
+    document.querySelector("#current-next").disabled = currentTasksPage >= pages;
+  }
+
   async function loadCurrentTasks() {
     if (currentTasksLoading) return;
     currentTasksLoading = true;
     setTaskStatus("#current-status", "正在加载当前任务…");
     try {
       const result = await request("query", "current_tasks");
-      const list = document.querySelector("#current-list");
-      taskThumbnailObserver.disconnect();
-      list.replaceChildren();
+      currentTasksData = result.tasks;
       const paused = result.config && result.config.queue_paused ? " · 队列已暂停" : "";
       setTaskStatus(
         "#current-stats",
         `排队 ${result.counts.queued} 个 · 执行中 ${result.counts.running} 个${paused}`
       );
-      if (!result.tasks.length) {
-        list.append(make("div", "placeholder", "现在没有排队或执行中的任务喵～"));
-      } else {
-        for (const task of result.tasks) list.append(taskCard(task));
-      }
+      renderCurrentTasks();
       setTaskStatus("#current-status", "");
     } catch (error) {
       setTaskStatus("#current-status", error.message || String(error), true);
@@ -1597,6 +1696,7 @@
         query
       });
       historyPages = result.pages;
+      if (historyPage > result.pages) return loadTaskHistory(result.pages);
       historySelected.clear();
       const list = document.querySelector("#history-list");
       taskThumbnailObserver.disconnect();
@@ -1636,10 +1736,11 @@
 
   async function showTaskDetail(taskId) {
     openModal(`任务 #${taskId}`, make("p", "muted", "正在加载任务详情…"));
+    modalCard.classList.add("task-modal");
     try {
       const task = await request("query", "task_detail", {task_id: taskId});
       const layout = make("div", "task-detail-layout");
-      const visual = make("div");
+      const visual = make("div", "task-detail-visual");
       const previewKind = task.output_available ? "output" : task.reference_available ? "reference" : "";
       if (previewKind) {
         visual.append(await taskPreviewElement(
@@ -1653,17 +1754,17 @@
         empty.append(make("div", "preview-missing", "这个任务还没有可展示的图片"));
         visual.append(empty);
       }
+      let referenceBlock = null;
       if (task.output_available && task.reference_available) {
-        const reference = make("div", "task-detail-reference");
-        reference.append(make("div", "task-detail-label", "参考图"));
+        referenceBlock = make("div", "task-detail-reference");
+        referenceBlock.append(make("div", "task-detail-label", "参考图"));
         try {
           const thumb = await request("query", "task_thumbnail", {task_id: taskId, kind: "reference", size: "detail"});
           if (thumb.image) {
             const image = make("img");
             image.src = thumb.image;
             image.alt = `任务 #${taskId} 的参考图`;
-            reference.append(image);
-            visual.append(reference);
+            referenceBlock.append(image);
           }
         } catch (_) {
           // 参考图缺失不影响成品图展示。
@@ -1687,6 +1788,7 @@
         ["创建时间", formatTime(task.created_at)],
         ["开始时间", formatTime(task.started_at)],
         ["结束时间", formatTime(task.finished_at)],
+        ["用时", taskDuration(task)],
         ["重试次数", String(task.attempts || 0)],
         ["模型 / 尺寸", `${task.api_model || "—"} / ${task.api_size || "—"}`]
       ];
@@ -1695,12 +1797,11 @@
         meta.append(make("dd", "", value));
       }
       side.append(meta);
+      if (referenceBlock) side.append(referenceBlock);
 
-      side.append(make("div", "task-detail-label", "最终提示词"));
-      side.append(make("div", "task-detail-value", task.final_prompt || "—"));
+      side.append(taskPromptDetails("最终提示词", task.final_prompt));
       if (task.extra_prompt) {
-        side.append(make("div", "task-detail-label", "额外提示词"));
-        side.append(make("div", "task-detail-value", task.extra_prompt));
+        side.append(taskPromptDetails("额外提示词", task.extra_prompt));
       }
       if (task.error) {
         side.append(make("div", "task-detail-label", "错误"));
@@ -1732,6 +1833,18 @@
       setTaskStatus("#history-status", `已重新提交为任务 #${result.task_id}`);
       await loadTaskHistory(historyPage);
       await loadCurrentTasks();
+    } catch (error) {
+      setTaskStatus("#history-status", error.message || String(error), true);
+    }
+  }
+
+  async function deleteTask(taskId) {
+    if (!window.confirm(`确认删除任务 #${taskId} 及其文件？`)) return;
+    try {
+      const result = await request("action", "delete_tasks", {ids_json: JSON.stringify([taskId])});
+      if (result.error) throw new Error(result.error);
+      setTaskStatus("#history-status", `已删除任务 #${taskId}`);
+      await loadTaskHistory(historyPage);
     } catch (error) {
       setTaskStatus("#history-status", error.message || String(error), true);
     }
@@ -1783,6 +1896,16 @@
   document.querySelector("#api-save").addEventListener("click", saveDrawingApi);
   document.querySelector("#api-models").addEventListener("click", fetchDrawingModels);
   document.querySelector("#current-refresh").addEventListener("click", () => void loadCurrentTasks());
+  document.querySelector("#current-prev").addEventListener("click", () => {
+    if (currentTasksPage <= 1) return;
+    currentTasksPage -= 1;
+    renderCurrentTasks();
+  });
+  document.querySelector("#current-next").addEventListener("click", () => {
+    if (currentTasksPage >= currentTasksPages) return;
+    currentTasksPage += 1;
+    renderCurrentTasks();
+  });
   document.querySelector("#history-refresh").addEventListener("click", () => void loadTaskHistory(1));
   document.querySelector("#history-status-filter").addEventListener("change", () => void loadTaskHistory(1));
   document.querySelector("#history-query").addEventListener("input", () => {

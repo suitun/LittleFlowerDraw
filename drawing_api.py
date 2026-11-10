@@ -17,12 +17,16 @@ import threading
 import uuid
 
 from maibot_sdk import Field, PluginConfigBase
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import field_validator, model_validator
 
 
 class DrawingApiError(RuntimeError):
-    pass
+    """绘图接口调用失败；status_code 保留上游 HTTP 状态。"""
+
+    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+        self.status_code = status_code
+        super().__init__(message)
 
 
 class DrawingApiConfig(PluginConfigBase):
@@ -146,9 +150,74 @@ def _png_bytes(image: bytes) -> bytes:
         raise DrawingApiError("参考图或角色图不是有效图片") from error
 
 
+def _upload_format(image: bytes) -> tuple[bytes, str, str]:
+    """能直接上传就保留原格式；不能直接上传的格式再转 PNG。"""
+    try:
+        with Image.open(io.BytesIO(image)) as source:
+            source_format = (source.format or "").upper()
+            formats = {
+                "PNG": ("png", "image/png"),
+                "JPEG": ("jpg", "image/jpeg"),
+                "WEBP": ("webp", "image/webp"),
+            }
+            if source_format in formats:
+                extension, content_type = formats[source_format]
+                return image, extension, content_type
+    except (UnidentifiedImageError, OSError) as error:
+        raise DrawingApiError("参考图或角色图不是有效图片") from error
+    return _png_bytes(image), "png", "image/png"
+
+
+def _resized_upload(image: bytes, edge: int) -> tuple[bytes, str, str]:
+    try:
+        with Image.open(io.BytesIO(image)) as source:
+            source = ImageOps.exif_transpose(source)
+            has_alpha = source.mode in {"RGBA", "LA"} or (
+                source.mode == "P" and "transparency" in source.info
+            )
+            converted = source.convert("RGBA" if has_alpha else "RGB")
+            converted.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            if has_alpha:
+                converted.save(output, format="PNG", optimize=True)
+                return output.getvalue(), "png", "image/png"
+            converted.save(output, format="JPEG", quality=92, optimize=True)
+            return output.getvalue(), "jpg", "image/jpeg"
+    except (UnidentifiedImageError, OSError) as error:
+        raise DrawingApiError("参考图或角色图不是有效图片") from error
+
+
+def _prepare_uploads(images: List[bytes]) -> List[tuple[bytes, str, str]]:
+    """优先原格式上传；总请求超过约 18MB 时才按比例压缩，给接口留余量。"""
+    prepared = [_upload_format(image) for image in images]
+    total = sum(len(data) for data, _, _ in prepared)
+    target = 18 * 1024**2
+    for _ in range(5):
+        if total <= target:
+            return prepared
+        ratio = max(0.35, min(1.0, (target / total) ** 0.5))
+        updated: List[tuple[bytes, str, str]] = []
+        for data, extension, content_type in prepared:
+            try:
+                with Image.open(io.BytesIO(data)) as source:
+                    edge = max(source.size)
+            except (UnidentifiedImageError, OSError) as error:
+                raise DrawingApiError("参考图或角色图不是有效图片") from error
+            next_edge = max(512, int(edge * ratio))
+            if next_edge >= edge:
+                updated.append((data, extension, content_type))
+            else:
+                updated.append(_resized_upload(data, next_edge))
+        prepared = updated
+        total = sum(len(data) for data, _, _ in prepared)
+    if total > target:
+        raise DrawingApiError("图片文件过大，无法压到接口可接受的大小")
+    return prepared
+
+
 def _multipart(
     fields: Dict[str, str],
-    files: List[tuple[str, str, bytes]],
+    files: List[tuple[str, str, bytes, str]],
 ) -> tuple[bytes, str]:
     boundary = "----LittleFlower" + uuid.uuid4().hex
     chunks: List[bytes] = []
@@ -157,12 +226,12 @@ def _multipart(
         chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
         chunks.append(str(value).encode("utf-8"))
         chunks.append(b"\r\n")
-    for name, filename, content in files:
+    for name, filename, content, content_type in files:
         chunks.append(f"--{boundary}\r\n".encode())
         chunks.append(
             f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode()
         )
-        chunks.append(b"Content-Type: image/png\r\n\r\n")
+        chunks.append(f"Content-Type: {content_type}\r\n\r\n".encode())
         chunks.append(content)
         chunks.append(b"\r\n")
     chunks.append(f"--{boundary}--\r\n".encode())
@@ -245,16 +314,16 @@ class OpenAIImageClient:
             raise DrawingApiError("绘图 API 尚未配置")
         if not images:
             raise DrawingApiError("绘图 API 需要至少一张图片")
-        png_images = [_png_bytes(image) for image in images]
+        prepared = _prepare_uploads(images)
         fields = {
             "model": config.model,
             "prompt": prompt,
-            "size": _resolve_size(config, png_images[0]),
+            "size": _resolve_size(config, prepared[0][0]),
             "n": "1",
         }
         files = [
-            ("image[]", f"image{index + 1}.png", image)
-            for index, image in enumerate(png_images)
+            ("image[]", f"image{index + 1}.{extension}", data, content_type)
+            for index, (data, extension, content_type) in enumerate(prepared)
         ]
         body, boundary = _multipart(fields, files)
         request = Request(
@@ -273,7 +342,13 @@ class OpenAIImageClient:
                 raw = response.read()
         except HTTPError as error:
             detail = error.read(1200).decode("utf-8", "replace")
-            raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}") from error
+            if error.code == 400:
+                error.close()
+                lowered = detail.lower()
+                if any(token in lowered for token in ("too large", "size", "maximum", "4mb")):
+                    raise DrawingApiError("图片文件太大或格式不符合接口要求", status_code=400) from error
+                raise DrawingApiError("图片不符合接口要求", status_code=400) from error
+            raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}", status_code=error.code) from error
         except (URLError, TimeoutError, OSError) as error:
             raise DrawingApiError(f"绘图 API 请求失败: {error}") from error
 

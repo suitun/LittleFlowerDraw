@@ -15,6 +15,7 @@ class AccessDecision:
 
     allowed: bool
     reply: str = ""
+    reply_key: str = ""
 
 
 class CommandGuard:
@@ -47,12 +48,14 @@ class CommandGuard:
                 return AccessDecision(
                     False,
                     render_guard_reply(settings.guard_replies.whitelist_denied, command_label(command_id), ""),
+                    "whitelist_denied",
                 )
         policy = self.policy_for(settings, command_id)
         if policy.permission == "仅管理员":
             return AccessDecision(
                 False,
                 render_guard_reply(settings.guard_replies.admin_only, command_label(command_id), ""),
+                "admin_only",
             )
         return AccessDecision(True)
 

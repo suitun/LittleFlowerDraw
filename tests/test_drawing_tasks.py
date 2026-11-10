@@ -293,6 +293,13 @@ class DrawingTaskStoreTests(unittest.TestCase):
         self.assertFalse((self.data_dir / "drawing_tasks" / str(record.id)).exists())
         self.assertFalse(output_path.exists())
 
+    def test_delete_tasks_does_not_fail_when_a_file_is_already_locked(self) -> None:
+        record = make_task(self.store, requester_id="user-locked", source_key="message-locked")
+        self.store.succeed(record.id, "")
+        with patch.object(self.store, "_remove_files", side_effect=OSError("文件被占用")):
+            self.assertEqual(self.store.delete_tasks([record.id]), 1)
+        self.assertIsNone(self.store.get(record.id))
+
     def test_history_pagination_and_filters(self) -> None:
         first = self._create_and_finish("user-a", "message-a", ["小花"], "绘图", "succeed")
         second = self._create_and_finish("user-b", "message-b", ["小花", "阿花"], "双人绘图", "fail")
@@ -330,6 +337,11 @@ class DrawingTaskStoreTests(unittest.TestCase):
         by_id, id_total = self.store.list_history(query=str(third.id))
         self.assertEqual([record.id for record in by_id], [third.id])
         self.assertEqual(id_total, 1)
+
+        by_exact_id, exact_total = self.store.list_history(query=f"#{third.id}")
+        self.assertEqual([record.id for record in by_exact_id], [third.id])
+        self.assertEqual(exact_total, 1)
+        self.assertEqual(self.store.list_history(query="2026"), ([], 0))
 
         # 未结束的状态不属于历史
         self.assertEqual(self.store.list_history(status="running"), ([], 0))

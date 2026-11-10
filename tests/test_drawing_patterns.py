@@ -1,6 +1,18 @@
 import unittest
+from importlib import import_module
+from pathlib import Path
+from types import ModuleType
 
-from drawing_patterns import match_drawing_request
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = "little_flower_draw_drawing_pattern_tests"
+package = ModuleType(PACKAGE)
+package.__path__ = [str(ROOT)]
+sys.modules[PACKAGE] = package
+drawing_patterns = import_module(f"{PACKAGE}.drawing_patterns")
+match_drawing_request = drawing_patterns.match_drawing_request
 
 
 REPLACE = ["变{角色名} {额外提示词}", "{角色名}穿 {额外提示词}"]
@@ -60,8 +72,14 @@ class DrawingPatternTests(unittest.TestCase):
         for templates, kind, message in cases:
             with self.subTest(templates=templates):
                 with self.assertRaisesRegex(ValueError, message):
-                    from drawing_patterns import validate_templates
-                    validate_templates(templates, kind)
+                    drawing_patterns.validate_templates(templates, kind)
+
+    def test_optional_at_prefix_requires_a_bot_mention(self) -> None:
+        templates = ["@变{角色名} {额外提示词}"]
+        self.assertIsNone(match_drawing_request("变角色A 外套", templates, [], []))
+        result = match_drawing_request("变角色A 外套", templates, [], [], mentioned_bot=True)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.role_names, ["角色A"])
 
     def test_plain_text_does_not_match(self) -> None:
         self.assertIsNone(match("今天吃什么"))

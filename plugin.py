@@ -36,6 +36,7 @@ from .drawing_tasks import (
     QueueFullError,
     TaskRecord,
 )
+from .help_image import render_help_image
 from .role_messages import (
     CorruptImageError,
     ImageInputError,
@@ -45,6 +46,7 @@ from .role_messages import (
     MissingImageError,
     UnsupportedImageFormatError,
     get_message_text,
+    message_mentions_user,
     validate_image,
 )
 from .role_patterns import (
@@ -57,6 +59,7 @@ from .role_patterns import (
     render_image_format_reply,
     render_image_reason_reply,
     render_image_size_reply,
+    render_list_reply,
     render_reply,
     render_task_fail_reply,
     render_task_reply,
@@ -133,6 +136,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         self._task_submit_lock = asyncio.Lock()
         self._pending_writes: Set[asyncio.Task[bool]] = set()
         self._seen_messages: OrderedDict[Tuple[str, ...], None] = OrderedDict()
+        self._stream_is_group: Dict[str, bool] = {}
 
     async def on_load(self) -> None:
         self._store = await asyncio.to_thread(RoleStore, self.ctx.paths.data_dir)
@@ -223,7 +227,15 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         if settings is None:
             raise RuntimeError("WebUI 设置尚未初始化")
         text = get_message_text(message)
-        request = match_request(text, settings.keywords.register_templates, settings.keywords.view_templates)
+        mentioned_bot = message_mentions_user(message, account_id)
+        request = match_request(
+            text,
+            settings.keywords.register_templates,
+            settings.keywords.view_templates,
+            settings.keywords.list_templates,
+            settings.keywords.help_templates,
+            mentioned_bot=mentioned_bot,
+        )
         drawing = None
         if request is None:
             drawing = match_drawing_request(
@@ -231,6 +243,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 settings.drawing.replace_templates,
                 settings.drawing.together_templates,
                 settings.drawing.group_templates,
+                mentioned_bot=mentioned_bot,
             )
         if request is None and drawing is None:
             return {"action": "continue"}
@@ -250,7 +263,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         decision = guard.check_access(command_id, user_id, group_id)
         if not decision.allowed:
             try:
-                await self._send_guard_reply(message, decision.reply)
+                await self._send_guard_reply(message, decision.reply, decision.reply_key)
             except Exception:
                 self.ctx.logger.exception("小花绘权限提示未能送达")
             return {"action": "abort", "custom_result": {"handled_by": "小花绘"}}
@@ -276,17 +289,89 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
 
     async def _send_busy(self, job: Job) -> None:
         stream_id = await self._open_chat(job.message)
-        await self._send_text(render_reply(job.settings.replies.busy, ""), stream_id)
+        user_id = str(job.message["message_info"]["user_info"]["user_id"])
+        await self._send_keyed_text(
+            job.settings.replies, "busy", render_reply(job.settings.replies.busy, ""), stream_id, user_id
+        )
 
-    async def _send_guard_reply(self, message: Dict[str, Any], text: str) -> None:
+    async def _send_guard_reply(self, message: Dict[str, Any], text: str, reply_key: str) -> None:
         if not text:
             return
         stream_id = await self._open_chat(message)
-        await self._send_text(text, stream_id)
+        user_id = str(message["message_info"]["user_info"]["user_id"])
+        await self._send_keyed_text(
+            self._settings_store.current().guard_replies, reply_key, text, stream_id, user_id
+        )
 
-    async def _send_text(self, text: str, stream_id: str) -> None:
-        if text and not await self.ctx.send.text(text, stream_id):
+    @staticmethod
+    def _reply_uses_at(section: Any, key: str) -> bool:
+        return key in section.at_replies
+
+    async def _send_text(
+        self,
+        text: str,
+        stream_id: str,
+        *,
+        at_user_id: str = "",
+        at_enabled: bool = False,
+    ) -> None:
+        if not text:
+            return
+        if at_enabled and at_user_id and self._stream_is_group.get(stream_id, False):
+            segments = [
+                {"type": "at", "data": {"target_user_id": at_user_id}},
+                {"type": "text", "data": text},
+            ]
+            if not await self.ctx.send.hybrid(segments, stream_id):
+                raise ReplyDeliveryError("角色库 @ 回复发送失败")
+            return
+        if not await self.ctx.send.text(text, stream_id):
             raise ReplyDeliveryError("角色库文字回复发送失败")
+
+    async def _send_keyed_text(
+        self, section: Any, key: str, text: str, stream_id: str, user_id: str
+    ) -> None:
+        at_enabled = self._reply_uses_at(section, key)
+        await self._send_text(text, stream_id, at_user_id=user_id, at_enabled=at_enabled)
+
+    async def _send_help_image(self, section: Any, image: bytes, stream_id: str, user_id: str) -> None:
+        at_enabled = (
+            any(key in section.at_replies for key in ("help_title", "help_footer"))
+            and self._stream_is_group.get(stream_id, False)
+        )
+        content = base64.b64encode(image).decode("ascii")
+        if at_enabled and user_id:
+            segments = [
+                {"type": "at", "data": {"target_user_id": user_id}},
+                {"type": "image", "content": content},
+            ]
+            if not await self.ctx.send.hybrid(segments, stream_id):
+                raise ReplyDeliveryError("帮助图片发送失败")
+            return
+        if not await self.ctx.send.image(content, stream_id):
+            raise ReplyDeliveryError("帮助图片发送失败")
+
+    async def _send_role_view(
+        self,
+        section: Any,
+        text: str,
+        image: bytes,
+        stream_id: str,
+        user_id: str,
+    ) -> None:
+        at_enabled = self._reply_uses_at(section, "view")
+        segments = []
+        if at_enabled and user_id and self._stream_is_group.get(stream_id, False):
+            segments.append({"type": "at", "data": {"target_user_id": user_id}})
+        if text:
+            segments.append({"type": "text", "data": text})
+        if not segments:
+            if not await self.ctx.send.image(base64.b64encode(image).decode("ascii"), stream_id):
+                raise ReplyDeliveryError("角色图片发送失败")
+            return
+        segments.append({"type": "image", "content": base64.b64encode(image).decode("ascii")})
+        if not await self.ctx.send.hybrid(segments, stream_id):
+            raise ReplyDeliveryError("角色回复图文消息发送失败")
 
     async def _open_chat(self, message: Dict[str, Any]) -> str:
         info = message["message_info"]
@@ -304,7 +389,9 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         )
         if not isinstance(result, dict) or not result.get("success") or not result.get("session_id"):
             raise RuntimeError("无法打开角色库请求对应的聊天流")
-        return str(result["session_id"])
+        stream_id = str(result["session_id"])
+        self._stream_is_group[stream_id] = bool(group.get("group_id"))
+        return stream_id
 
     async def _run_jobs(self) -> None:
         while True:
@@ -321,7 +408,13 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 else:
                     denied = await asyncio.to_thread(guard.check_quota, job.command_id, user_id)
                     if denied:
-                        await self._send_text(denied, stream_id)
+                        await self._send_keyed_text(
+                            self._settings_store.current().guard_replies,
+                            "quota_exceeded",
+                            denied,
+                            stream_id,
+                            user_id,
+                        )
                         continue
                     succeeded = await asyncio.wait_for(self._handle_job(job, stream_id), timeout=90)
                     if succeeded:
@@ -338,9 +431,22 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 if stream_id:
                     try:
                         if isinstance(job, DrawingSubmitJob):
-                            await self._send_text(render_reply(job.settings.replies.error, ""), stream_id)
+                            await self._send_keyed_text(
+                                job.settings.replies,
+                                "error",
+                                render_reply(job.settings.replies.error, ""),
+                                stream_id,
+                                user_id,
+                            )
                         else:
-                            await self._send_reply(job.settings.replies.error, stream_id, job.request.role_name)
+                            await self._send_reply(
+                                job.settings.replies.error,
+                                stream_id,
+                                job.request.role_name,
+                                section=job.settings.replies,
+                                key="error",
+                                user_id=user_id,
+                            )
                     except Exception:
                         self.ctx.logger.exception("小花绘错误提示也未能发送")
             finally:
@@ -355,7 +461,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         return None
 
     async def _drawing_role_names(
-        self, candidate: DrawingCandidate, settings: WebUISettings, stream_id: str
+        self, candidate: DrawingCandidate, settings: WebUISettings, stream_id: str, user_id: str
     ) -> Optional[List[str]]:
         store = self._store
         if store is None:
@@ -365,20 +471,38 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             names = set(await asyncio.to_thread(store.list_names, GLOBAL_LIBRARY_SCOPE))
             pair = self._split_role_pair(candidate.roles_text, names)
             if pair is None:
-                await self._send_reply(settings.drawing.missing_role_reply, stream_id, candidate.roles_text)
+                await self._send_reply(
+                    settings.drawing.missing_role_reply,
+                    stream_id,
+                    candidate.roles_text,
+                    section=settings.drawing,
+                    key="missing_role_reply",
+                    user_id=user_id,
+                )
                 return None
             role_names = list(pair)
         if candidate.kind == "group":
             minimum = settings.drawing.min_group_roles
             maximum = settings.drawing.max_group_roles
             if not minimum <= len(role_names) <= maximum:
-                await self._send_text(
-                    render_drawing_count_reply(settings.drawing.group_count_reply, minimum, maximum), stream_id
+                await self._send_keyed_text(
+                    settings.drawing,
+                    "group_count_reply",
+                    render_drawing_count_reply(settings.drawing.group_count_reply, minimum, maximum),
+                    stream_id,
+                    user_id,
                 )
                 return None
         for role_name in role_names:
             if await asyncio.to_thread(store.get_role, GLOBAL_LIBRARY_SCOPE, role_name) is None:
-                await self._send_reply(settings.drawing.missing_role_reply, stream_id, role_name)
+                await self._send_reply(
+                    settings.drawing.missing_role_reply,
+                    stream_id,
+                    role_name,
+                    section=settings.drawing,
+                    key="missing_role_reply",
+                    user_id=user_id,
+                )
                 return None
         return role_names
 
@@ -400,21 +524,27 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             None,
         )
         if active is not None:
-            await self._send_text(
-                render_task_reply(settings.drawing.active_task_reply, active.id), stream_id
+            await self._send_keyed_text(
+                settings.drawing,
+                "active_task_reply",
+                render_task_reply(settings.drawing.active_task_reply, active.id),
+                stream_id,
+                user_id,
             )
             return False
         denied = await asyncio.to_thread(guard.check_quota, job.command_id, user_id)
         if denied:
-            await self._send_text(denied, stream_id)
+            await self._send_keyed_text(self._settings_store.current().guard_replies, "quota_exceeded", denied, stream_id, user_id)
             return False
         queue_config = settings.task_queue
         if queue_config.max_waiting_tasks > 0:
             if await asyncio.to_thread(task_store.count_queued) >= queue_config.max_waiting_tasks:
-                await self._send_text(render_reply(settings.drawing.queue_full_reply, ""), stream_id)
+                await self._send_keyed_text(
+                    settings.drawing, "queue_full_reply", render_reply(settings.drawing.queue_full_reply, ""), stream_id, user_id
+                )
                 return False
 
-        role_names = await self._drawing_role_names(candidate, settings, stream_id)
+        role_names = await self._drawing_role_names(candidate, settings, stream_id, user_id)
         if role_names is None:
             return False
         limits = ImageLimits(
@@ -423,16 +553,26 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         try:
             reference = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
         except MissingImageError:
-            await self._send_text(render_reply(settings.drawing.missing_reference_reply, ""), stream_id)
+            await self._send_keyed_text(
+                settings.drawing, "missing_reference_reply", render_reply(settings.drawing.missing_reference_reply, ""), stream_id, user_id
+            )
             return False
         except ImageInputError as error:
             self.ctx.logger.warning("小花绘绘图参考图未通过校验", exc_info=True)
-            await self._send_text(self._image_error_text(settings, error), stream_id)
+            await self._send_keyed_text(
+                settings.replies,
+                self._image_error_key(error),
+                self._image_error_text(settings, error),
+                stream_id,
+                user_id,
+            )
             return False
 
         api = await asyncio.to_thread(self._require_drawing_api_store().current)
         if not api.configured:
-            await self._send_text(render_reply(settings.drawing.api_missing_reply, ""), stream_id)
+            await self._send_keyed_text(
+                settings.drawing, "api_missing_reply", render_reply(settings.drawing.api_missing_reply, ""), stream_id, user_id
+            )
             return False
         base_prompt = {
             "replace": settings.drawing.replace_prompt,
@@ -495,20 +635,32 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 ),
                 None,
             )
-            await self._send_text(
-                render_task_reply(settings.drawing.active_task_reply, active.id if active else -1), stream_id
+            await self._send_keyed_text(
+                settings.drawing,
+                "active_task_reply",
+                render_task_reply(settings.drawing.active_task_reply, active.id if active else -1),
+                stream_id,
+                user_id,
             )
             return False
         except QueueFullError:
-            await self._send_text(render_reply(settings.drawing.queue_full_reply, ""), stream_id)
+            await self._send_keyed_text(
+                settings.drawing, "queue_full_reply", render_reply(settings.drawing.queue_full_reply, ""), stream_id, user_id
+            )
             return False
         except DuplicateTaskError:
-            await self._send_text(render_reply(settings.drawing.duplicate_task_reply, ""), stream_id)
+            await self._send_keyed_text(
+                settings.drawing, "duplicate_task_reply", render_reply(settings.drawing.duplicate_task_reply, ""), stream_id, user_id
+            )
             return False
 
         position = await asyncio.to_thread(task_store.queue_position, task.id)
-        await self._send_text(
-            render_task_reply(settings.drawing.submitted_reply, task.id, position), stream_id
+        await self._send_keyed_text(
+            settings.drawing,
+            "submitted_reply",
+            render_task_reply(settings.drawing.submitted_reply, task.id, position),
+            stream_id,
+            user_id,
         )
         self._task_wakeup.set()
         self.ctx.logger.info(
@@ -582,7 +734,10 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             await self._fail_task(task, "任务执行超时")
         except DrawingApiError as error:
             self.ctx.logger.warning("小花绘任务 #%s API 调用失败：%s", task.id, error)
-            await self._fail_task(task, str(error))
+            if error.status_code == 400:
+                await self._fail_task(task, "图片不符合接口要求", reply_key="image_rejected_reply")
+            else:
+                await self._fail_task(task, str(error))
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -632,8 +787,11 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         )
         await asyncio.to_thread(task_store.set_stage, task.id, "saving")
         path = await asyncio.to_thread(self._save_drawing_image, result.image, task.kind)
-        await self._send_completion(task, stream_id, result.image)
         await asyncio.to_thread(task_store.succeed, task.id, str(path))
+        try:
+            await self._send_completion(task, stream_id, result.image)
+        except Exception:
+            self.ctx.logger.exception("小花绘任务 #%s 结果发送失败，可在任务历史查看", task.id)
         self.ctx.logger.info(
             "小花绘任务 #%s 完成：类型=%s 角色=%s 输出=%s",
             task.id,
@@ -653,11 +811,15 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         text = render_task_reply(template, task.id)
         if "{任务ID}" not in template:
             text = f"任务 #{task.id} {text}"
-        segments = [
-            {"type": "at", "data": {"target_user_id": task.requester_id}},
-            {"type": "text", "data": text},
-            {"type": "image", "content": base64.b64encode(image).decode("ascii")},
-        ]
+        segments = []
+        if settings is not None and self._reply_uses_at(settings.drawing, "completion_reply") and task.group_id:
+            segments.append({"type": "at", "data": {"target_user_id": task.requester_id}})
+        segments.extend(
+            (
+                {"type": "text", "data": text},
+                {"type": "image", "content": base64.b64encode(image).decode("ascii")},
+            )
+        )
         if not await self.ctx.send.hybrid(segments, stream_id):
             raise ReplyDeliveryError("绘图结果发送失败")
 
@@ -676,7 +838,9 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         except Exception:
             self.ctx.logger.exception("小花绘任务 #%s 退还次数失败", task.id)
 
-    async def _fail_task(self, task: TaskRecord, error: str, notify: bool = True) -> None:
+    async def _fail_task(
+        self, task: TaskRecord, error: str, notify: bool = True, reply_key: str = "task_failed_reply"
+    ) -> None:
         task_store = self._task_store
         if task_store is None:
             return
@@ -688,13 +852,19 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         if notify:
             try:
                 stream_id = await self._open_chat(self._task_message(record))
-                await self._send_text(
-                    render_task_fail_reply(
-                        self._settings_store.current().drawing.task_failed_reply,
-                        record.id,
-                        error[:800],
-                    ),
+                settings = self._settings_store.current()
+                if reply_key == "image_rejected_reply":
+                    text = render_task_reply(settings.drawing.image_rejected_reply, record.id)
+                else:
+                    text = render_task_fail_reply(
+                        settings.drawing.task_failed_reply, record.id, error[:800]
+                    )
+                await self._send_keyed_text(
+                    settings.drawing,
+                    reply_key,
+                    text,
                     stream_id,
+                    record.requester_id,
                 )
             except Exception:
                 self.ctx.logger.exception("小花绘任务 #%s 失败提示未能送达", record.id)
@@ -720,13 +890,59 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         """执行一次角色库请求，返回是否真正成功；失败或未找到不消耗次数。"""
         settings = job.settings
         role_name = job.request.role_name
-        if not valid_role_name(role_name, settings.library.max_name_length):
-            await self._send_reply(settings.replies.invalid_name, stream_id, role_name)
-            return False
+        user_id = str(job.message["message_info"]["user_info"]["user_id"])
         store = self._store
         if store is None:
             raise RuntimeError("角色库尚未初始化")
-
+        if job.request.action == "help":
+            sections = (
+                (
+                    "角色库",
+                    (
+                        ("登记角色", settings.keywords.register_templates),
+                        ("查看角色", settings.keywords.view_templates),
+                        ("角色列表", settings.keywords.list_templates),
+                    ),
+                ),
+                (
+                    "绘图",
+                    (
+                        ("单角色替换", settings.drawing.replace_templates),
+                        ("双角色替换", settings.drawing.together_templates),
+                        ("多人替换", settings.drawing.group_templates),
+                    ),
+                ),
+                ("帮助", (("帮助", settings.keywords.help_templates),)),
+            )
+            image = await asyncio.to_thread(
+                render_help_image,
+                pick_reply(settings.replies.help_title),
+                sections,
+                pick_reply(settings.replies.help_footer),
+                "模板开头的 @ 表示要先 @ 小花；更多别名可在插件设置里查看。",
+            )
+            await self._send_help_image(settings.replies, image, stream_id, user_id)
+            return True
+        if job.request.action == "list":
+            names = await asyncio.to_thread(store.list_names, GLOBAL_LIBRARY_SCOPE)
+            if names:
+                text = render_list_reply(settings.replies.list_reply, len(names), "、".join(names))
+                key = "list_reply"
+            else:
+                text = pick_reply(settings.replies.list_empty_reply)
+                key = "list_empty_reply"
+            await self._send_keyed_text(settings.replies, key, text, stream_id, user_id)
+            return True
+        if not valid_role_name(role_name, settings.library.max_name_length):
+            await self._send_reply(
+                settings.replies.invalid_name,
+                stream_id,
+                role_name,
+                section=settings.replies,
+                key="invalid_name",
+                user_id=user_id,
+            )
+            return False
         if job.request.action == "register":
             limits = ImageLimits(
                 max_image_bytes=settings.library.max_image_mb * 1024**2,
@@ -734,25 +950,55 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             try:
                 image = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
             except MissingImageError:
-                await self._send_reply(settings.replies.missing_image, stream_id, role_name)
+                await self._send_reply(
+                    settings.replies.missing_image,
+                    stream_id,
+                    role_name,
+                    section=settings.replies,
+                    key="missing_image",
+                    user_id=user_id,
+                )
                 return False
             except ImageInputError as error:
                 self.ctx.logger.warning("小花绘登记图片未通过校验", exc_info=True)
-                await self._send_text(self._image_error_text(settings, error), stream_id)
+                await self._send_keyed_text(
+                    settings.replies,
+                    self._image_error_key(error),
+                    self._image_error_text(settings, error),
+                    stream_id,
+                    user_id,
+                )
                 return False
-            owner_id = str(job.message["message_info"]["user_info"]["user_id"])
-            overwritten = await self._save_role(store, role_name, owner_id, image)
+            overwritten = await self._save_role(store, role_name, user_id, image)
             template = settings.replies.overwritten if overwritten else settings.replies.registered
-            await self._send_reply(template, stream_id, role_name)
+            await self._send_reply(
+                template,
+                stream_id,
+                role_name,
+                section=settings.replies,
+                key="overwritten" if overwritten else "registered",
+                user_id=user_id,
+            )
             return True
 
         image = await asyncio.to_thread(store.get, GLOBAL_LIBRARY_SCOPE, role_name)
         if image is None:
-            await self._send_reply(settings.replies.not_found, stream_id, role_name)
+            await self._send_reply(
+                settings.replies.not_found,
+                stream_id,
+                role_name,
+                section=settings.replies,
+                key="not_found",
+                user_id=user_id,
+            )
             return False
-        await self._send_reply(settings.replies.view, stream_id, role_name)
-        if not await self.ctx.send.image(base64.b64encode(image).decode("ascii"), stream_id):
-            raise ReplyDeliveryError("角色图片发送失败")
+        await self._send_role_view(
+            settings.replies,
+            render_reply(settings.replies.view, role_name),
+            image,
+            stream_id,
+            user_id,
+        )
         return True
 
     async def _save_role(self, store: RoleStore, role_name: str, owner_id: str, image: bytes) -> bool:
@@ -773,8 +1019,19 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 if isinstance(result, BaseException):
                     self.ctx.logger.error("小花绘等待中的图库事务写入失败：%s", result)
 
-    async def _send_reply(self, template: str, stream_id: str, role_name: str) -> None:
-        await self._send_text(render_reply(template, role_name), stream_id)
+    async def _send_reply(
+        self,
+        template: Any,
+        stream_id: str,
+        role_name: str,
+        *,
+        section: Any,
+        key: str,
+        user_id: str,
+    ) -> None:
+        await self._send_keyed_text(
+            section, key, render_reply(template, role_name), stream_id, user_id
+        )
 
     @staticmethod
     def _image_error_text(settings: WebUISettings, error: ImageInputError) -> str:
@@ -791,6 +1048,16 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         template = pick_reply(settings.replies.invalid_image)
         text = render_image_reason_reply(template, str(error))
         return text if "{原因}" in template else f"{text}：{error}"
+
+    @staticmethod
+    def _image_error_key(error: ImageInputError) -> str:
+        if isinstance(error, ImageTooLargeError):
+            return "image_too_large"
+        if isinstance(error, UnsupportedImageFormatError):
+            return "image_invalid_format"
+        if isinstance(error, CorruptImageError):
+            return "image_corrupt"
+        return "invalid_image"
 
     def _require_store(self) -> RoleStore:
         if self._store is None:

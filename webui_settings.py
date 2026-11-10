@@ -29,6 +29,51 @@ from .settings import KeywordConfig, LibraryConfig, ReplyConfig
 CommandId = Literal.__getitem__(COMMAND_IDS)
 
 
+_LEGACY_DRAWING_PROMPTS = {
+    "replace_prompt": "把图1中的角色替换为图2中的角色，保持姿势、构图、背景和其他人物不变。",
+    "together_prompt": "把图1中的两个角色分别替换为图2和图3中的角色，保持姿势、构图、背景和其他人物不变。",
+    "group_prompt": "把图1中的角色依次替换为后续图片中的角色，保持姿势、构图、背景和其他人物不变。",
+}
+_PREVIOUS_DRAWING_PROMPTS = {
+    "replace_prompt": (
+        "图1是必须保留的底图，严格保留图1的构图、镜头、裁切、视角、姿势、背景、画风和画面比例。"
+        "图2只是角色外观参考，不是底图。只把图1中的人物替换成图2中的角色，替换脸部、发型、发色、服装和配色；"
+        "不要改变图1的构图，不要增加画面外内容。如果图1是头像、大头、半身或局部特写，输出必须保持同样的裁切和比例，"
+        "绝对不要扩成全身，也不要生成三视图、角色设定图或全身立绘。如果图2是多视角、三视图或角色设定图，只能提取角色外观，"
+        "不要复制图2的分栏、姿势、背景或版式。"
+    ),
+    "together_prompt": (
+        "图1是必须保留的底图，严格保留图1的构图、镜头、裁切、视角、姿势、背景、画风和画面比例。"
+        "图2和图3分别是两个角色的外观参考，不是底图。只把图1中的两个人物分别替换成图2和图3中的角色，保留图1的一切构图信息；"
+        "如果参考图是多视角、三视图或角色设定图，只提取角色外观，不要复制参考图的版式、分栏、姿势或背景。"
+        "不要扩图、不要新增画面外内容、不要生成角色设定图或全身立绘。"
+    ),
+    "group_prompt": (
+        "图1是必须保留的底图，严格保留图1的构图、镜头、裁切、视角、姿势、背景、画风和画面比例。"
+        "从图2开始依次是每个角色的外观参考，不是底图。只替换图1中的对应人物，保留图1的所有构图信息；"
+        "如果角色参考图是多视角、三视图或角色设定图，只提取角色外观，不要复制参考图的版式、分栏、姿势或背景。"
+        "不要扩图、不要新增画面外内容、不要生成角色设定图或全身立绘。"
+    ),
+}
+_DRAWING_PROMPTS = {
+    "replace_prompt": (
+        "图1是底图，图2是角色外观参考。把图1中的人物替换成图2的角色，认准图2的发型、发色、服装和配色，不要换成别的角色。"
+        "保留图1的构图、镜头、姿势、背景和裁切；图2是三视图或设定图时只参考角色外观，不要照搬版式。"
+        "二次元画风，光影、色彩和细节可以适当发挥，但不要改变画面主体。"
+    ),
+    "together_prompt": (
+        "图1是底图，图2和图3分别是两个角色的外观参考。把图1中的两个人物分别替换成图2和图3的角色，"
+        "认准各自的发型、发色、服装和配色。保留图1的构图、镜头、姿势、背景和裁切；参考图是三视图时只取外观，"
+        "不要照搬版式。二次元画风，光影和色彩可以适当发挥。"
+    ),
+    "group_prompt": (
+        "图1是底图，后续图片依次是角色外观参考。把图1中的人物按顺序替换成这些角色，认准各自的发型、发色、服装和配色。"
+        "保留图1的构图、镜头、姿势、背景和裁切；参考图是三视图时只取外观，不要照搬版式。"
+        "二次元画风，光影和色彩可以适当发挥。"
+    ),
+}
+
+
 class GuardReplyConfig(PluginConfigBase):
     whitelist_denied: List[str] = Field(
         default_factory=lambda: ["这里还不是小花能营业的地方呢，先请管理员把这里加进白名单吧喵～"],
@@ -42,19 +87,29 @@ class GuardReplyConfig(PluginConfigBase):
         default_factory=lambda: ["「{指令}」的次数用完啦，{重置时间}后再来找小花玩吧喵～"],
         description="次数用完时的回复，支持 {指令}、{重置时间}。",
     )
+    at_replies: List[str] = Field(default_factory=list, description="触发时 @ 回复人的权限提示类型。")
 
     @field_validator("*", mode="before")
     @classmethod
     def normalize_variants(cls, value: object) -> List[str]:
         return normalize_reply_variants(value)
 
-    @field_validator("*")
+    @field_validator("whitelist_denied", "admin_only", "quota_exceeded")
     @classmethod
     def validate_templates(cls, values: List[str]) -> List[str]:
         result = [validate_guard_reply(value) for value in values if value.strip()]
         if not result:
             raise ValueError("权限提示至少需要一条非空内容")
         return result
+
+    @field_validator("at_replies")
+    @classmethod
+    def validate_at_replies(cls, values: List[str]) -> List[str]:
+        allowed = {"whitelist_denied", "admin_only", "quota_exceeded"}
+        unknown = [value for value in values if value not in allowed]
+        if unknown:
+            raise ValueError("未知的权限提示类型: " + "、".join(unknown))
+        return list(dict.fromkeys(values))
 
 
 class AccessConfig(PluginConfigBase):
@@ -141,17 +196,17 @@ class DrawingConfig(PluginConfigBase):
         description="多人替换触发模板，每行一条；必须包含 {角色名列表}，角色用 @ 分隔。",
     )
     replace_prompt: str = Field(
-        default="把图1中的角色替换为图2中的角色，保持姿势、构图、背景和其他人物不变。",
+        default=_DRAWING_PROMPTS["replace_prompt"],
         max_length=8000,
         description="单角色替换的基础提示词，额外提示词会接在后面。",
     )
     together_prompt: str = Field(
-        default="把图1中的两个角色分别替换为图2和图3中的角色，保持姿势、构图、背景和其他人物不变。",
+        default=_DRAWING_PROMPTS["together_prompt"],
         max_length=8000,
         description="双角色替换的基础提示词。",
     )
     group_prompt: str = Field(
-        default="把图1中的角色依次替换为后续图片中的角色，保持姿势、构图、背景和其他人物不变。",
+        default=_DRAWING_PROMPTS["group_prompt"],
         max_length=8000,
         description="多人替换的基础提示词。",
     )
@@ -201,6 +256,11 @@ class DrawingConfig(PluginConfigBase):
         default_factory=lambda: ["任务 #{任务ID} 画失败了喵…{错误}"],
         description="任务失败时的回复，支持 {任务ID}、{错误}。",
     )
+    image_rejected_reply: List[str] = Field(
+        default_factory=lambda: ["任务 #{任务ID} 这张图小花画不了喵，换一张参考图再试试吧～"],
+        description="接口返回 400（图片不合规）时的短回复，支持 {任务ID}。",
+    )
+    at_replies: List[str] = Field(default_factory=list, description="触发时 @ 回复人的绘图任务回复类型。")
 
     @field_validator(
         "missing_reference_reply",
@@ -214,11 +274,50 @@ class DrawingConfig(PluginConfigBase):
         "queue_full_reply",
         "duplicate_task_reply",
         "task_failed_reply",
+        "image_rejected_reply",
         mode="before",
     )
     @classmethod
     def normalize_reply_fields(cls, value: object) -> List[str]:
         return normalize_reply_variants(value)
+
+    @field_validator("at_replies", mode="before")
+    @classmethod
+    def normalize_at_replies(cls, value: object) -> List[str]:
+        return normalize_reply_variants(value, max_items=32)
+
+    @field_validator("at_replies")
+    @classmethod
+    def validate_at_replies(cls, values: List[str]) -> List[str]:
+        allowed = {
+            "missing_reference_reply",
+            "missing_role_reply",
+            "group_count_reply",
+            "api_missing_reply",
+            "api_error_reply",
+            "completion_reply",
+            "submitted_reply",
+            "active_task_reply",
+            "queue_full_reply",
+            "duplicate_task_reply",
+            "task_failed_reply",
+            "image_rejected_reply",
+        }
+        unknown = [value for value in values if value not in allowed]
+        if unknown:
+            raise ValueError("未知的绘图任务回复类型: " + "、".join(unknown))
+        return list(dict.fromkeys(values))
+
+    @model_validator(mode="before")
+    @classmethod
+    def upgrade_legacy_prompts(cls, data: object) -> object:
+        if isinstance(data, dict):
+            updated = dict(data)
+            for field, replacement in _DRAWING_PROMPTS.items():
+                if updated.get(field) in {_LEGACY_DRAWING_PROMPTS[field], _PREVIOUS_DRAWING_PROMPTS[field]}:
+                    updated[field] = replacement
+            return updated
+        return data
 
     @field_validator("replace_templates")
     @classmethod
@@ -283,6 +382,11 @@ class DrawingConfig(PluginConfigBase):
     def validate_task_failed(cls, values: List[str]) -> List[str]:
         return [validate_task_fail_reply(value) for value in values if value.strip()]
 
+    @field_validator("image_rejected_reply")
+    @classmethod
+    def validate_image_rejected(cls, values: List[str]) -> List[str]:
+        return [validate_task_reply(value) for value in values if value.strip()]
+
     @field_validator("missing_reference_reply")
     @classmethod
     def validate_missing_reference(cls, values: List[str]) -> List[str]:
@@ -302,6 +406,7 @@ class DrawingConfig(PluginConfigBase):
             "queue_full_reply",
             "duplicate_task_reply",
             "task_failed_reply",
+            "image_rejected_reply",
         ):
             if not getattr(self, name):
                 raise ValueError(f"{name} 至少需要一条回复")

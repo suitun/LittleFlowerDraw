@@ -80,6 +80,24 @@ def _too_large_message(actual_bytes: Optional[int], max_bytes: int) -> str:
     return f"这张图片有 {actual_mb:.1f}MB，超过小花能记住的 {limit_mb:.1f}MB 啦，压缩一下再发喵～"
 
 
+def message_mentions_user(message: Dict[str, Any], user_id: str) -> bool:
+    """判断消息是否 @ 了指定 QQ；兼容宿主和 OneBot 的 at 目标字段。"""
+    target = str(user_id or "").strip()
+    if not target:
+        return False
+    for segment in _message_segments(message):
+        if segment.get("type") != "at":
+            continue
+        data = segment.get("data")
+        if isinstance(data, dict):
+            values = [data.get("target_user_id"), data.get("qq"), data.get("user_id")]
+        else:
+            values = [data]
+        if any(str(value).strip() == target for value in values if value is not None):
+            return True
+    return False
+
+
 def get_message_text(message: Dict[str, Any]) -> str:
     """只拼接顶层文字消息段，不将引用预览当成用户输入。"""
     texts: List[str] = []

@@ -10,6 +10,8 @@ from .role_patterns import (
     validate_image_format_reply,
     validate_image_reason_reply,
     validate_image_size_reply,
+    validate_list_reply,
+    validate_plain_reply,
     validate_reply,
     validate_trigger_groups,
 )
@@ -37,10 +39,23 @@ class KeywordConfig(PluginConfigBase):
         default_factory=lambda: ["小花小花我要看{角色名}"],
         description="查看触发模板。每条必须包含一次 {角色名}；保存配置后立即按新模板匹配。",
     )
+    list_templates: List[str] = Field(
+        default_factory=lambda: ["小花记得谁"],
+        description="角色列表触发模板。不能包含占位符；可添加多条别名。",
+    )
+    help_templates: List[str] = Field(
+        default_factory=lambda: ["小花绘帮助"],
+        description="帮助触发模板。不能包含占位符；可添加多条别名。",
+    )
 
     @model_validator(mode="after")
     def validate_templates(self) -> "KeywordConfig":
-        validate_trigger_groups(self.register_templates, self.view_templates)
+        validate_trigger_groups(
+            self.register_templates,
+            self.view_templates,
+            self.list_templates,
+            self.help_templates,
+        )
         return self
 
 
@@ -49,9 +64,26 @@ class ReplyConfig(PluginConfigBase):
     __ui_icon__ = "heart"
     __ui_order__ = 2
 
+    at_replies: List[str] = Field(default_factory=list, description="触发时 @ 回复人的回复类型。")
     registered: List[str] = Field(default_factory=lambda: ["小花记住{角色名}了喵～"], description="首次入库成功回复，支持 {角色名}。")
     overwritten: List[str] = Field(default_factory=lambda: ["{角色名}的新模样，小花也记住了喵～"], description="同名覆盖成功回复。")
     view: List[str] = Field(default_factory=lambda: ["找到{角色名}啦，给你看看喵～"], description="查看图片前的文字，留空只发图片。")
+    list_reply: List[str] = Field(
+        default_factory=lambda: ["小花记得 {角色数量} 个角色喵～\n{角色列表}"],
+        description="角色列表回复，支持 {角色数量}、{角色列表}。",
+    )
+    list_empty_reply: List[str] = Field(
+        default_factory=lambda: ["小花现在还没记住任何角色呢，先介绍一个给小花吧喵～"],
+        description="角色库为空时的列表回复，不支持占位符。",
+    )
+    help_title: List[str] = Field(
+        default_factory=lambda: ["小花绘帮助"],
+        description="帮助图片标题，不支持占位符。",
+    )
+    help_footer: List[str] = Field(
+        default_factory=lambda: ["带图或引用图片，就能让小花帮忙喵～"],
+        description="帮助图片底部提示，不支持占位符。",
+    )
     not_found: List[str] = Field(default_factory=lambda: ["小花还不认识{角色名}呢，先把 TA 介绍给小花吧喵～"], description="没有找到该角色时的回复。")
     missing_image: List[str] = Field(default_factory=lambda: ["想记住{角色名}的话，要附上图片，或引用一条有图的消息哦喵～"], description="登记消息和引用目标都没有可用图片时的回复。")
     invalid_name: List[str] = Field(default_factory=lambda: ["这个名字小花有点记不住，换个短一点的单行名字吧喵～"], description="角色名为空、过长或含控制字符时的回复。")
@@ -90,6 +122,21 @@ class ReplyConfig(PluginConfigBase):
     def validate_invalid_image(cls, values: List[str]) -> List[str]:
         return [validate_image_reason_reply(value) for value in values if value.strip()]
 
+    @field_validator("list_reply")
+    @classmethod
+    def validate_list(cls, values: List[str]) -> List[str]:
+        return [validate_list_reply(value) for value in values if value.strip()]
+
+    @field_validator("list_empty_reply")
+    @classmethod
+    def validate_list_empty(cls, values: List[str]) -> List[str]:
+        return [validate_plain_reply(value) for value in values if value.strip()]
+
+    @field_validator("help_title", "help_footer")
+    @classmethod
+    def validate_help_text(cls, values: List[str]) -> List[str]:
+        return [validate_plain_reply(value) for value in values if value.strip()]
+
     @field_validator("image_too_large")
     @classmethod
     def validate_image_too_large(cls, values: List[str]) -> List[str]:
@@ -120,10 +167,40 @@ class ReplyConfig(PluginConfigBase):
             "image_corrupt",
             "busy",
             "error",
+            "list_reply",
+            "list_empty_reply",
+            "help_title",
+            "help_footer",
         ):
             if not getattr(self, name):
                 raise ValueError(f"{name} 至少需要一条回复")
         return self
+
+    @field_validator("at_replies")
+    @classmethod
+    def validate_at_replies(cls, values: List[str]) -> List[str]:
+        allowed = {
+            "registered",
+            "overwritten",
+            "view",
+            "not_found",
+            "missing_image",
+            "invalid_name",
+            "invalid_image",
+            "image_too_large",
+            "image_invalid_format",
+            "image_corrupt",
+            "busy",
+            "error",
+            "list_reply",
+            "list_empty_reply",
+            "help_title",
+            "help_footer",
+        }
+        unknown = [value for value in values if value not in allowed]
+        if unknown:
+            raise ValueError("未知的角色库回复类型: " + "、".join(unknown))
+        return list(dict.fromkeys(values))
 
 
 class LibraryConfig(PluginConfigBase):

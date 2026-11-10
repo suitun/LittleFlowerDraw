@@ -30,7 +30,7 @@ class WebUISettingsTests(unittest.TestCase):
 
         self.assertEqual(
             [policy.command for policy in settings.commands.policies],
-            ["登记角色", "查看角色", "单角色替换", "双角色替换", "多人替换"],
+            ["登记角色", "查看角色", "角色列表", "帮助", "单角色替换", "双角色替换", "多人替换"],
         )
         self.assertEqual(settings.access.admin_qq, "2685275264")
         self.assertFalse(settings.access.whitelist_enabled)
@@ -41,7 +41,7 @@ class WebUISettingsTests(unittest.TestCase):
         config = webui_settings.CommandPolicyConfig(
             policies=[{"command": "登记角色", "permission": "仅管理员", "limit": 2, "reset_days": 2}]
         )
-        self.assertEqual(len(config.policies), 5)
+        self.assertEqual(len(config.policies), 7)
         register = next(policy for policy in config.policies if policy.command == "登记角色")
         self.assertEqual((register.permission, register.limit, register.reset_days), ("仅管理员", 2, 2))
 
@@ -76,6 +76,7 @@ class WebUISettingsTests(unittest.TestCase):
         loaded.access.admin_qq = "2999999999"
         loaded.guard_replies.admin_only = ["只有管理员可以哦"]
         loaded.replies.registered = ["记住{角色名}了喵～", "好哒，记住{角色名}啦～"]
+        loaded.replies.at_replies = ["registered", "view"]
         store.save(loaded)
 
         reopened = webui_settings.WebUISettingsStore(self.data_dir)
@@ -83,6 +84,7 @@ class WebUISettingsTests(unittest.TestCase):
         self.assertEqual(current.access.admin_qq, "2999999999")
         self.assertEqual(current.guard_replies.admin_only, ["只有管理员可以哦"])
         self.assertEqual(current.replies.registered, ["记住{角色名}了喵～", "好哒，记住{角色名}啦～"])
+        self.assertEqual(current.replies.at_replies, ["registered", "view"])
         self.assertEqual(store.current().access.admin_qq, "2999999999")
 
     def test_legacy_config_sections_are_migrated(self) -> None:
