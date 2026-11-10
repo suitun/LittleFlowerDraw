@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import asyncio
 import base64
@@ -135,7 +135,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.rpc.image_streams.clear()
         self.rpc.calls.clear()
 
-    async def test_first_message_opens_real_target_chat_and_preserves_multiple_images(self) -> None:
+    async def test_first_message_opens_real_target_chat_and_keeps_only_the_first_image(self) -> None:
         images = [png("red"), png("green"), png("blue")]
         result = await self.submit(self.message("小花小花这是 小花", images))
 
@@ -143,12 +143,12 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rpc.calls[0]["capability"], "chat.open_session")
         open_args = self.rpc.calls[0]["args"]
         self.assertEqual((open_args["chat_type"], open_args["group_id"], open_args["account_id"]), ("group", "10001", "99999"))
-        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.registered.format(角色名="小花", 图片数量=3)])
+        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.registered.format(角色名="小花")])
 
         self.clear_output()
         await self.submit(self.message("小花小花我要看小花"))
-        self.assertEqual(self.rpc.images, images)
-        self.assertEqual(self.rpc.image_streams, [self.rpc.session()] * 3)
+        self.assertEqual(self.rpc.images, [images[0]])
+        self.assertEqual(self.rpc.image_streams, [self.rpc.session()])
 
     async def test_global_library_is_shared_across_users_and_groups_and_overwritten_globally(self) -> None:
         original, replacement = png("red"), png("blue")
@@ -161,7 +161,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.clear_output()
 
         await self.submit(self.message("小花小花这是 花花", [replacement], group="10002", user="20002"))
-        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.overwritten.format(角色名="花花", 图片数量=1)])
+        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.overwritten.format(角色名="花花")])
         self.clear_output()
 
         await self.submit(self.message("小花小花我要看花花", group="10001", user="20003"))
@@ -189,7 +189,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         for name, images, reply_to, reply_field in (
             ("无图", [], "", "missing_image"),
             ("无引用图", [], "missing-source", "missing_image"),
-            ("坏图", [png("red"), b"not-an-image"], "", "invalid_image"),
+            ("坏图", [b"not-an-image"], "", "invalid_image"),
         ):
             with self.subTest(name=name):
                 self.clear_output()
@@ -200,12 +200,12 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("图片未通过校验", "\n".join(logs.output))
                 else:
                     await self.submit(request)
-                expected = self.config["replies"][reply_field].format(角色名=name, 图片数量=0)
+                expected = self.config["replies"][reply_field].format(角色名=name)
                 self.assertEqual(self.rpc.texts, [expected])
                 self.assertFalse(self.rpc.images)
                 self.clear_output()
                 await self.submit(self.message("小花小花我要看" + name))
-                self.assertEqual(self.rpc.texts, [self.config["replies"]["not_found"].format(角色名=name, 图片数量=0)])
+                self.assertEqual(self.rpc.texts, [self.config["replies"]["not_found"].format(角色名=name)])
                 self.assertFalse(self.rpc.images)
 
     async def test_hot_config_changes_both_matching_and_replies_without_reloading(self) -> None:
@@ -216,7 +216,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         config = deepcopy(self.config)
         config["keywords"]["register_templates"] = ["记住 {角色名}"]
         config["keywords"]["view_templates"] = ["看看{角色名}"]
-        config["replies"]["registered"] = "收好{角色名}的{图片数量}张图啦喵！"
+        config["replies"]["registered"] = "收好{角色名}啦喵！"
         config["replies"]["view"] = ""
         self.plugin.set_plugin_config(config)
         await self.plugin.on_config_update("self", config, "test-update")
@@ -225,7 +225,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["action"], "continue")
         self.assertFalse(self.rpc.calls)
         await self.submit(self.message("记住 新角色", [image]))
-        self.assertEqual(self.rpc.texts, ["收好新角色的1张图啦喵！"])
+        self.assertEqual(self.rpc.texts, ["收好新角色啦喵！"])
         self.clear_output()
         await self.submit(self.message("看看原角色"))
         self.assertFalse(self.rpc.texts)
@@ -279,7 +279,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rpc.texts, [self.config["replies"]["error"]])
         self.clear_output()
         await self.submit(self.message("小花小花我要看失败角色"))
-        self.assertEqual(self.rpc.texts, [self.config["replies"]["not_found"].format(角色名="失败角色", 图片数量=0)])
+        self.assertEqual(self.rpc.texts, [self.config["replies"]["not_found"].format(角色名="失败角色")])
         self.assertFalse(self.rpc.images)
 
     async def test_failed_confirmation_is_logged_and_does_not_claim_delivery(self) -> None:
@@ -319,6 +319,78 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
             release.set()
             await asyncio.wait_for(self.plugin._queue.join(), timeout=3)
 
+    async def test_webui_lists_and_serves_detail_and_thumbnail(self) -> None:
+        image = png("red")
+        await self.submit(self.message("小花小花这是 角色甲", [image]))
+
+        listing = await self.plugin.webui_roles()
+
+        self.assertEqual(listing["total"], 1)
+        self.assertEqual(listing["register_template"], "小花小花这是 {角色名}")
+        self.assertEqual([item["name"] for item in listing["items"]], ["角色甲"])
+        detail = await self.plugin.webui_role_detail("角色甲")
+        self.assertTrue(detail["preview"].startswith("data:image/webp;base64,"))
+        thumbnail = await self.plugin.webui_role_thumbnail("角色甲")
+        self.assertTrue(thumbnail["image"].startswith("data:image/webp;base64,"))
+
+    async def test_webui_rename_and_delete_keep_the_store_consistent(self) -> None:
+        await self.submit(self.message("小花小花这是 角色甲", [png("red")]))
+
+        renamed = await self.plugin.webui_role_rename("角色甲", "角色乙")
+
+        self.assertTrue(renamed["renamed"])
+        self.assertEqual(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "角色乙"), png("red"))
+        await self.plugin.webui_role_delete("角色乙")
+        self.assertIsNone(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "角色乙"))
+        with self.assertRaisesRegex(ValueError, "角色不存在"):
+            await self.plugin.webui_role_delete("角色乙")
+
+    async def test_webui_upload_creates_and_replaces_a_role_then_removes_the_temp_file(self) -> None:
+        uploads = self.plugin.ctx.paths.data_dir / "uploads"
+        uploads.mkdir(parents=True, exist_ok=True)
+        uploaded = uploads / "first.png"
+        uploaded.write_bytes(png("blue"))
+
+        with patch.object(self.plugin.ctx.webui, "claim_upload", AsyncMock(return_value={"path": str(uploaded)})):
+            created = await self.plugin.webui_role_set_image("upload-1", "上传角色")
+
+        self.assertTrue(created["saved"])
+        self.assertFalse(created["overwritten"])
+        self.assertFalse(uploaded.exists())
+        self.assertEqual(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "上传角色"), png("blue"))
+        self.assertEqual(self.plugin._store.get_owner(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "上传角色"), "webui")
+
+        replacement = uploads / "second.png"
+        replacement.write_bytes(png("green"))
+        with patch.object(self.plugin.ctx.webui, "claim_upload", AsyncMock(return_value={"path": str(replacement)})):
+            replaced = await self.plugin.webui_role_set_image("upload-2", "上传角色")
+
+        self.assertTrue(replaced["overwritten"])
+        self.assertFalse(replacement.exists())
+        self.assertEqual(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "上传角色"), png("green"))
+        self.assertEqual(self.plugin._store.get_owner(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "上传角色"), "webui")
+
+    async def test_webui_upload_rejects_invalid_image_and_still_removes_the_temp_file(self) -> None:
+        uploads = self.plugin.ctx.paths.data_dir / "uploads"
+        uploads.mkdir(parents=True, exist_ok=True)
+        uploaded = uploads / "broken.png"
+        uploaded.write_bytes(b"not-an-image")
+
+        with patch.object(self.plugin.ctx.webui, "claim_upload", AsyncMock(return_value={"path": str(uploaded)})):
+            with self.assertRaises(ValueError):
+                await self.plugin.webui_role_set_image("upload-bad", "坏上传")
+
+        self.assertFalse(uploaded.exists())
+        self.assertIsNone(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "坏上传"))
+
+    async def test_webui_upload_rejects_a_path_outside_the_upload_directory(self) -> None:
+        outside = self.plugin.ctx.paths.data_dir / "outside.png"
+        outside.write_bytes(png("red"))
+
+        with patch.object(self.plugin.ctx.webui, "claim_upload", AsyncMock(return_value={"path": str(outside)})):
+            with self.assertRaisesRegex(RuntimeError, "上传目录"):
+                await self.plugin.webui_role_set_image("upload-outside", "越界")
+
     async def test_unload_waits_for_an_in_flight_database_transaction(self) -> None:
         started = threading.Event()
         release = threading.Event()
@@ -342,7 +414,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(unloading, timeout=3)
         finally:
             release.set()
-        self.assertEqual(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "卸载中的角色"), [image])
+        self.assertEqual(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "卸载中的角色"), image)
         self.assertFalse(self.plugin._pending_writes)
 
     async def test_unload_cancels_active_work_and_drains_pending_jobs(self) -> None:

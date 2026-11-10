@@ -9,7 +9,7 @@ import unicodedata
 
 
 ROLE_FIELD = "{角色名}"
-REPLY_FIELDS = {"角色名", "图片数量"}
+REPLY_FIELDS = {"角色名"}
 
 
 @dataclass(frozen=True)
@@ -68,9 +68,9 @@ def validate_reply(template: str) -> str:
     """只允许简单命名占位符，拒绝属性访问、格式化指令和拼错的变量。"""
     for _, field, format_spec, conversion in string.Formatter().parse(template):
         if field is not None and (field not in REPLY_FIELDS or format_spec or conversion):
-            raise ValueError("回复模板仅支持 {角色名}、{图片数量}，不支持格式化指令")
+            raise ValueError("回复模板仅支持 {角色名}，不支持格式化指令")
     return template
 
 
-def render_reply(template: str, role_name: str = "", image_count: int = 0) -> str:
-    return template.format_map({"角色名": role_name, "图片数量": image_count})
+def render_reply(template: str, role_name: str = "") -> str:
+    return template.format_map({"角色名": role_name})

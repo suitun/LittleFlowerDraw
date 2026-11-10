@@ -73,20 +73,20 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
         self.red = image_bytes("red")
         self.blue = image_bytes("blue")
 
-    async def test_attached_images_override_quoted_image_and_are_deduplicated(self) -> None:
+    async def test_attached_images_override_quoted_image_and_only_the_first_is_used(self) -> None:
         message = quoted_message()
-        message["raw_message"].extend([image_segment(self.red), image_segment(self.blue), image_segment(self.red)])
-        self.assertEqual(await self.resolver.resolve(message, "chat"), [self.red, self.blue])
+        message["raw_message"].extend([image_segment(self.blue), image_segment(self.red)])
+        self.assertEqual(await self.resolver.resolve(message, "chat"), self.blue)
         self.ctx.message.get_by_id.assert_not_awaited()
         self.ctx.api.call.assert_not_awaited()
 
-    async def test_duplicate_images_do_not_consume_extra_slots(self) -> None:
-        resolver = MessageImageResolver(self.ctx, ImageLimits(max_images=1))
-        self.assertEqual(await resolver.resolve({"raw_message": [image_segment(self.red)] * 7}, "chat"), [self.red])
+    async def test_additional_images_are_ignored_without_extra_slots(self) -> None:
+        resolver = MessageImageResolver(self.ctx, ImageLimits())
+        self.assertEqual(await resolver.resolve({"raw_message": [image_segment(self.red)] * 7}, "chat"), self.red)
 
     async def test_history_query_requests_binary_data_and_current_stream(self) -> None:
         self.ctx.message.get_by_id.return_value = {"session_id": "chat", "raw_message": [image_segment(self.red)]}
-        self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), [self.red])
+        self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), self.red)
         self.ctx.message.get_by_id.assert_awaited_once_with("-42", stream_id="chat", include_binary_data=True)
         self.ctx.api.call.assert_not_awaited()
 
@@ -95,19 +95,19 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
             "group_id": 123,
             "message": [{"type": "image", "data": {"file": "base64://" + base64.b64encode(self.red).decode()}}],
         }
-        self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), [self.red])
+        self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), self.red)
         self.ctx.api.get.assert_awaited_once_with("adapter.snowluma.message.get_msg", version="1")
         self.ctx.api.call.assert_awaited_once_with("adapter.snowluma.message.get_msg", version="1", message_id="-42")
 
     async def test_quoted_snowluma_cq_string_can_supply_an_image(self) -> None:
         encoded = base64.b64encode(self.red).decode("ascii")
         self.ctx.api.call.return_value = {"group_id": 123, "message": f"原消息[CQ:image,file=base64://{encoded}]"}
-        self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), [self.red])
+        self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), self.red)
 
     async def test_history_without_stored_binary_uses_the_public_message_api(self) -> None:
         self.ctx.message.get_by_id.return_value = {"session_id": "chat", "raw_message": [{"type": "image", "data": "描述"}]}
         self.ctx.api.call.return_value = {"group_id": 123, "message": [image_segment(self.red)]}
-        self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), [self.red])
+        self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), self.red)
 
     async def test_get_image_can_read_a_trusted_absolute_path(self) -> None:
         with TemporaryDirectory() as directory:
@@ -117,7 +117,7 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
                 {"group_id": 123, "message": [{"type": "image", "data": {"file": "opaque-image-id"}}]},
                 {"status": "ok", "retcode": 0, "data": {"file": str(path)}},
             ]
-            self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), [self.red])
+            self.assertEqual(await self.resolver.resolve(quoted_message(), "chat"), self.red)
         self.assertEqual(self.ctx.api.call.await_args_list, [
             call("adapter.snowluma.message.get_msg", version="1", message_id="-42"),
             call("adapter.snowluma.file.get_image", version="1", params={"file": "opaque-image-id"}),
@@ -135,7 +135,7 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
         url = "https://gchat.qpic.cn/image?rkey=temporary"
         with patch.object(role_messages, "_download_image", return_value=self.red) as download:
             result = await self.resolver.resolve({"message": [{"type": "image", "data": {"url": url}}]}, "chat")
-        self.assertEqual(result, [self.red])
+        self.assertEqual(result, self.red)
         download.assert_called_once_with(url, self.resolver.limits.max_image_bytes)
 
     async def test_expired_cdn_url_can_be_refreshed_with_get_image(self) -> None:
@@ -144,7 +144,7 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
             result = await self.resolver.resolve({"message": [{"type": "image", "data": {
                 "url": "https://gchat.qpic.cn/old", "file": "opaque-id",
             }}]}, "chat")
-        self.assertEqual(result, [self.red])
+        self.assertEqual(result, self.red)
         self.ctx.api.call.assert_awaited_once_with("adapter.snowluma.file.get_image", version="1", params={"file": "opaque-id"})
 
     async def test_remote_client_local_path_can_use_its_cdn_url(self) -> None:
@@ -153,7 +153,7 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
         }}
         with patch.object(role_messages, "_download_image", return_value=self.red):
             result = await self.resolver.resolve({"message": [{"type": "image", "data": {"file": "opaque-id"}}]}, "chat")
-        self.assertEqual(result, [self.red])
+        self.assertEqual(result, self.red)
 
     async def test_missing_or_old_quote_reports_a_readable_error(self) -> None:
         self.ctx.api.get.return_value = None
@@ -196,14 +196,9 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret", str(error.exception))
         self.assertTrue(error.exception.__suppress_context__)
 
-    async def test_image_count_and_total_size_are_rejected_without_truncation(self) -> None:
+    async def test_first_image_is_used_and_additional_images_are_ignored(self) -> None:
         message = {"raw_message": [image_segment(self.red), image_segment(self.blue)]}
-        for limits in (
-            ImageLimits(max_images=1),
-            ImageLimits(max_total_bytes=len(self.red) + len(self.blue) - 1),
-        ):
-            with self.subTest(limits=limits), self.assertRaises(ImageInputError):
-                await MessageImageResolver(self.ctx, limits).resolve(message, "chat")
+        self.assertEqual(await MessageImageResolver(self.ctx, ImageLimits()).resolve(message, "chat"), self.red)
 
     async def test_individual_size_pixel_limit_format_and_corruption_are_rejected(self) -> None:
         cases = [
@@ -228,7 +223,7 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
         for image_format in ("PNG", "JPEG", "WEBP", "GIF"):
             with self.subTest(image_format=image_format):
                 data = image_bytes(image_format=image_format)
-                self.assertEqual(await self.resolver.resolve({"raw_message": [image_segment(data)]}, "chat"), [data])
+                self.assertEqual(await self.resolver.resolve({"raw_message": [image_segment(data)]}, "chat"), data)
 
 
 class _Response:

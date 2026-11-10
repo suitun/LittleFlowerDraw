@@ -1,0 +1,71 @@
+{
+  "schema_version": 2,
+  "required_capabilities": ["custom_pages", "image_upload"],
+  "pages": [
+    {
+      "id": "role-library",
+      "title": "角色库",
+      "description": "查看、搜索、改名、替换图片或删除小花记住的角色。",
+      "icon": "database",
+      "mode": "custom",
+      "entry": "webui/roles.html",
+      "layout": "document",
+      "queries": {
+        "roles": {
+          "api": "webui_roles",
+          "version": "1",
+          "parameters": {
+            "query": {"type": "string", "max_length": 64},
+            "page": {"type": "integer", "minimum": 1, "maximum": 100000},
+            "page_size": {"type": "integer", "minimum": 1, "maximum": 24},
+            "sort": {"type": "string", "choices": ["name", "updated"]}
+          }
+        },
+        "detail": {
+          "api": "webui_role_detail",
+          "version": "1",
+          "parameters": {
+            "name": {"type": "string", "required": true, "max_length": 256}
+          }
+        },
+        "thumbnail": {
+          "api": "webui_role_thumbnail",
+          "version": "1",
+          "parameters": {
+            "name": {"type": "string", "required": true, "max_length": 256}
+          }
+        }
+      },
+      "actions": {
+        "delete": {
+          "api": "webui_role_delete",
+          "version": "1",
+          "parameters": {
+            "name": {"type": "string", "required": true, "max_length": 256}
+          },
+          "confirmation": "确认删除这个角色及其图片？此操作不可恢复。"
+        },
+        "rename": {
+          "api": "webui_role_rename",
+          "version": "1",
+          "parameters": {
+            "old_name": {"type": "string", "required": true, "max_length": 256},
+            "new_name": {"type": "string", "required": true, "max_length": 256}
+          }
+        },
+        "set_image": {
+          "api": "webui_role_set_image",
+          "version": "1",
+          "parameters": {
+            "upload_id": {"type": "string", "required": true, "max_length": 64},
+            "name": {"type": "string", "required": true, "max_length": 256}
+          },
+          "confirmation": "确认保存这张图片？同名角色会被替换。"
+        }
+      },
+      "uploads": {
+        "role_image": {"action": "set_image", "image_max_edge": 2048}
+      }
+    }
+  ]
+}

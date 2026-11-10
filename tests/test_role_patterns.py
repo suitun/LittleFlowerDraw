@@ -49,9 +49,9 @@ class RolePatternTests(unittest.TestCase):
             settings.KeywordConfig(register_templates=["登记 {角色名}"], view_templates=["登记{角色名}"])
 
     def test_reply_placeholders_are_validated_and_names_are_not_evaluated(self):
-        text = patterns.render_reply("记住{角色名}的{图片数量}张图啦 {{喵}}", "{别的变量}", 3)
-        self.assertEqual(text, "记住{别的变量}的3张图啦 {喵}")
-        for text in ("{不存在}", "{角色名.__class__}", "{角色名[0]}", "{角色名!r}", "{图片数量:1000000}", "{"):
+        text = patterns.render_reply("记住{角色名}啦 {{喵}}", "{别的变量}")
+        self.assertEqual(text, "记住{别的变量}啦 {喵}")
+        for text in ("{不存在}", "{角色名.__class__}", "{角色名[0]}", "{角色名!r}", "{图片数量}", "{"):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 settings.ReplyConfig(registered=text)
 

@@ -2,17 +2,27 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple
+from pathlib import Path
+from typing import Any, Dict, Optional, Set, Tuple
 
 import asyncio
 import base64
+import unicodedata
 
-from maibot_sdk import Command, HookHandler, MaiBotPlugin
+from maibot_sdk import API, Command, HookHandler, MaiBotPlugin
 from maibot_sdk.types import HookMode
 
-from .role_messages import ImageInputError, ImageLimits, MessageImageResolver, MissingImageError, get_message_text
+from .role_messages import (
+    ImageInputError,
+    ImageLimits,
+    MessageImageResolver,
+    MissingImageError,
+    get_message_text,
+    validate_image,
+)
 from .role_patterns import RoleRequest, match_request, render_reply, valid_role_name
 from .role_store import RoleStore
+from .role_webui import CACHE_DIR_NAME, detail_payload, list_payload, thumbnail_payload
 from .settings import LittleFlowerDrawConfig
 
 
@@ -170,13 +180,11 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
 
         if job.request.action == "register":
             limits = ImageLimits(
-                max_images=config.library.max_images,
                 max_image_bytes=config.library.max_image_mb * 1024**2,
-                max_total_bytes=config.library.max_total_mb * 1024**2,
                 max_pixels=config.library.max_pixels,
             )
             try:
-                images = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
+                image = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
             except MissingImageError:
                 await self._send_reply(config.replies.missing_image, stream_id, role_name)
                 return
@@ -185,23 +193,22 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 await self._send_reply(config.replies.invalid_image, stream_id, role_name)
                 return
             owner_id = str(job.message["message_info"]["user_info"]["user_id"])
-            overwritten = await self._save_role(store, role_name, owner_id, images)
+            overwritten = await self._save_role(store, role_name, owner_id, image)
             template = config.replies.overwritten if overwritten else config.replies.registered
-            await self._send_reply(template, stream_id, role_name, len(images))
+            await self._send_reply(template, stream_id, role_name)
             return
 
-        images = await asyncio.to_thread(store.get, GLOBAL_LIBRARY_SCOPE, role_name)
-        if images is None:
+        image = await asyncio.to_thread(store.get, GLOBAL_LIBRARY_SCOPE, role_name)
+        if image is None:
             await self._send_reply(config.replies.not_found, stream_id, role_name)
             return
-        await self._send_reply(config.replies.view, stream_id, role_name, len(images))
-        for image in images:
-            if not await self.ctx.send.image(base64.b64encode(image).decode("ascii"), stream_id):
-                raise ReplyDeliveryError("角色图片发送失败")
+        await self._send_reply(config.replies.view, stream_id, role_name)
+        if not await self.ctx.send.image(base64.b64encode(image).decode("ascii"), stream_id):
+            raise ReplyDeliveryError("角色图片发送失败")
 
-    async def _save_role(self, store: RoleStore, role_name: str, owner_id: str, images: List[bytes]) -> bool:
+    async def _save_role(self, store: RoleStore, role_name: str, owner_id: str, image: bytes) -> bool:
         # 线程中的 SQLite 写入无法通过取消协程停止；卸载前必须等待事务收尾。
-        write = asyncio.create_task(asyncio.to_thread(store.save, GLOBAL_LIBRARY_SCOPE, role_name, owner_id, images))
+        write = asyncio.create_task(asyncio.to_thread(store.save, GLOBAL_LIBRARY_SCOPE, role_name, owner_id, image))
         self._pending_writes.add(write)
         try:
             return await asyncio.shield(write)
@@ -217,10 +224,84 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 if isinstance(result, BaseException):
                     self.ctx.logger.error("小花绘等待中的图库事务写入失败：%s", result)
 
-    async def _send_reply(self, template: str, stream_id: str, role_name: str, image_count: int = 0) -> None:
-        text = render_reply(template, role_name, image_count)
+    async def _send_reply(self, template: str, stream_id: str, role_name: str) -> None:
+        text = render_reply(template, role_name)
         if text and not await self.ctx.send.text(text, stream_id):
             raise ReplyDeliveryError("角色库文字回复发送失败")
+
+    def _require_store(self) -> RoleStore:
+        if self._store is None:
+            raise RuntimeError("角色库尚未初始化")
+        return self._store
+
+    @property
+    def _webui_cache_dir(self) -> Path:
+        return self.ctx.paths.runtime_dir / CACHE_DIR_NAME
+
+    @API("webui_roles", description="分页读取角色库列表与统计", version="1")
+    async def webui_roles(
+        self, query: str = "", page: int = 1, page_size: int = 20, sort: str = "name"
+    ) -> Dict[str, Any]:
+        payload = await asyncio.to_thread(
+            list_payload, self._require_store(), GLOBAL_LIBRARY_SCOPE, query, page, page_size, sort
+        )
+        payload["register_template"] = self.config.keywords.register_templates[0]
+        return payload
+
+    @API("webui_role_detail", description="读取角色详情与压缩预览", version="1")
+    async def webui_role_detail(self, name: str) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            detail_payload, self._require_store(), GLOBAL_LIBRARY_SCOPE, name, self._webui_cache_dir
+        )
+
+    @API("webui_role_thumbnail", description="按需读取角色列表缩略图", version="1")
+    async def webui_role_thumbnail(self, name: str) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            thumbnail_payload, self._require_store(), GLOBAL_LIBRARY_SCOPE, name, self._webui_cache_dir
+        )
+
+    @API("webui_role_delete", description="删除角色及其唯一图片", version="1")
+    async def webui_role_delete(self, name: str) -> Dict[str, Any]:
+        deleted = await asyncio.to_thread(self._require_store().delete, GLOBAL_LIBRARY_SCOPE, name)
+        if not deleted:
+            raise ValueError("角色不存在")
+        return {"deleted": True}
+
+    @API("webui_role_rename", description="重命名角色并保留创建者和图片", version="1")
+    async def webui_role_rename(self, old_name: str, new_name: str) -> Dict[str, Any]:
+        config = self.config.model_copy(deep=True)
+        new_name = unicodedata.normalize("NFC", new_name.strip())
+        if not valid_role_name(new_name, config.library.max_name_length):
+            raise ValueError("新角色名不合法")
+        renamed = await asyncio.to_thread(self._require_store().rename, GLOBAL_LIBRARY_SCOPE, old_name, new_name)
+        if not renamed:
+            raise ValueError("角色不存在")
+        return {"renamed": old_name != new_name}
+
+    @API("webui_role_set_image", description="用 WebUI 上传的图片新建或替换角色", version="1")
+    async def webui_role_set_image(self, upload_id: str, name: str) -> Dict[str, Any]:
+        config = self.config.model_copy(deep=True)
+        name = unicodedata.normalize("NFC", name.strip())
+        if not valid_role_name(name, config.library.max_name_length):
+            raise ValueError("角色名不合法")
+        uploads_dir = (self.ctx.paths.data_dir / "uploads").resolve()
+        upload = await self.ctx.webui.claim_upload(upload_id)
+        upload_path = Path(str(upload.get("path") or "")).resolve()
+        if not upload_path.is_relative_to(uploads_dir) or not upload_path.is_file():
+            raise RuntimeError("WebUI 上传文件不在插件上传目录内")
+        try:
+            image = await asyncio.to_thread(upload_path.read_bytes)
+            limits = ImageLimits(
+                max_image_bytes=config.library.max_image_mb * 1024**2,
+                max_pixels=config.library.max_pixels,
+            )
+            await asyncio.to_thread(validate_image, image, limits)
+            overwritten = await asyncio.to_thread(
+                self._require_store().save, GLOBAL_LIBRARY_SCOPE, name, "webui", image
+            )
+        finally:
+            await asyncio.to_thread(upload_path.unlink, missing_ok=True)
+        return {"saved": True, "overwritten": overwritten}
 
     @Command(
         "little_flower_draw_status",
@@ -229,7 +310,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
     )
     async def show_status(self, stream_id: str, **kwargs: Any) -> Tuple[bool, str, int]:
         message = (
-            "小花绘 0.1 · 让小花帮你画\n角色参考图库已就绪喵～\n登记/覆盖："
+            "小花绘 0.2 · 让小花帮你画\n角色参考图库已就绪喵～\n登记/覆盖："
             + " / ".join(self.config.keywords.register_templates)
             + "\n查看："
             + " / ".join(self.config.keywords.view_templates)

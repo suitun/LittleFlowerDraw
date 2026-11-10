@@ -14,7 +14,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_order__ = 0
 
     enabled: bool = Field(default=False, description="是否启用小花绘")
-    config_version: str = Field(default="0.2.0", description="配置结构版本")
+    config_version: str = Field(default="0.3.0", description="配置结构版本")
 
 
 class KeywordConfig(PluginConfigBase):
@@ -42,7 +42,7 @@ class ReplyConfig(PluginConfigBase):
     __ui_icon__ = "heart"
     __ui_order__ = 2
 
-    registered: str = Field(default="小花记住{角色名}了喵～", max_length=2000, description="首次入库成功回复，支持 {角色名}、{图片数量}。")
+    registered: str = Field(default="小花记住{角色名}了喵～", max_length=2000, description="首次入库成功回复，支持 {角色名}。")
     overwritten: str = Field(default="{角色名}的新模样，小花也记住了喵～", max_length=2000, description="同名覆盖成功回复。")
     view: str = Field(default="找到{角色名}啦，给你看看喵～", max_length=2000, description="查看图片前的文字，留空只发图片。")
     not_found: str = Field(default="小花还不认识{角色名}呢，先把 TA 介绍给小花吧喵～", max_length=2000, description="没有找到该角色时的回复。")
@@ -64,10 +64,8 @@ class LibraryConfig(PluginConfigBase):
     __ui_order__ = 3
 
     max_name_length: int = Field(default=64, ge=1, le=256, description="角色名最多字符数。角色库全局共享，所有群和用户都可查看、登记及覆盖同名角色。")
-    max_images: int = Field(default=6, ge=1, le=12, description="一次登记最多保存多少张图片；同名覆盖会完整替换整组图片。")
-    max_image_mb: int = Field(default=8, ge=1, le=8, description="每张图片最大 MB；同时受主程序消息大小和图片处理设置限制。")
-    max_total_mb: int = Field(default=12, ge=1, le=64, description="一次登记所有图片总大小上限（MB）。")
-    max_pixels: int = Field(default=40_000_000, ge=1, le=80_000_000, description="每张图片最大像素数（宽乘高）。")
+    max_image_mb: int = Field(default=8, ge=1, le=8, description="角色图片最大 MB；同时受主程序消息大小和图片处理设置限制。")
+    max_pixels: int = Field(default=40_000_000, ge=1, le=80_000_000, description="角色图片最大像素数（宽乘高）。")
 
 
 class LittleFlowerDrawConfig(PluginConfigBase):

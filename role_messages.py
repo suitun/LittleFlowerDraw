@@ -10,7 +10,6 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, url2pathn
 import asyncio
 import base64
 import binascii
-import hashlib
 import io
 import re
 import time
@@ -43,16 +42,14 @@ class _ImageFetchError(ImageInputError):
 
 @dataclass(frozen=True)
 class ImageLimits:
-    """一次入库允许的图片资源上限。"""
+    """单张角色图片的体积与像素上限。"""
 
-    max_images: int = 6
     max_image_bytes: int = 8 * 1024**2
-    max_total_bytes: int = 12 * 1024**2
     max_pixels: int = 40_000_000
 
     def __post_init__(self) -> None:
-        if min(self.max_images, self.max_image_bytes, self.max_total_bytes, self.max_pixels) <= 0:
-            raise ValueError("图片数量、体积和像素限制必须大于零")
+        if min(self.max_image_bytes, self.max_pixels) <= 0:
+            raise ValueError("图片体积和像素限制必须大于零")
 
 
 def get_message_text(message: Dict[str, Any]) -> str:
@@ -135,7 +132,7 @@ def _decode_base64(value: str, max_bytes: int) -> bytes:
     return data
 
 
-def _validate_image(data: bytes, limits: ImageLimits) -> None:
+def validate_image(data: bytes, limits: ImageLimits) -> None:
     if len(data) > limits.max_image_bytes:
         raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
     try:
@@ -193,7 +190,7 @@ def _download_image(url: str, max_bytes: int) -> bytes:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise _ImageFetchError("图片下载超时了，请重新发送图片喵")
-        request = Request(current_url, headers={"User-Agent": "LittleFlowerDraw/0.1", "Accept-Encoding": "identity"})
+        request = Request(current_url, headers={"User-Agent": "LittleFlowerDraw/0.2", "Accept-Encoding": "identity"})
         try:
             with opener.open(request, timeout=min(_NETWORK_TIMEOUT_SECONDS, remaining)) as response:
                 declared_length: Optional[int] = None
@@ -267,10 +264,11 @@ class MessageImageResolver:
         self.ctx = ctx
         self.limits = limits
 
-    async def resolve(self, message: Dict[str, Any], stream_id: str) -> List[bytes]:
+    async def resolve(self, message: Dict[str, Any], stream_id: str) -> bytes:
+        """读取角色唯一图片；附图有内容时只取第一张图片。"""
         attached = _image_segments(message)
         if attached:
-            return await self._resolve_segments(attached)
+            return await self._resolve_image(attached[0])
         target_id = _reply_message_id(message)
         if not target_id:
             raise MissingImageError("小花还没看到图片呢，请附上一张图片或引用图片消息喵")
@@ -289,7 +287,7 @@ class MessageImageResolver:
             historical_images = _image_segments(historical)
             if historical_images:
                 try:
-                    return await self._resolve_segments(historical_images)
+                    return await self._resolve_image(historical_images[0])
                 except MissingImageError:
                     # 历史记录中的媒体可能已被清理，再向连接器取这条消息的真实图片。
                     pass
@@ -300,26 +298,14 @@ class MessageImageResolver:
         images = _image_segments(detail)
         if not images:
             raise MissingImageError("引用的消息里没有图片，请附上一张图片喵")
-        return await self._resolve_segments(images)
+        return await self._resolve_image(images[0])
 
-    async def _resolve_segments(self, segments: List[Dict[str, Any]]) -> List[bytes]:
-        result: List[bytes] = []
-        seen = set()
-        total_bytes = 0
-        for segment in segments:
-            data = await self._load_segment(segment)
-            digest = hashlib.sha256(data).digest()
-            if digest in seen:
-                continue
-            if len(result) >= self.limits.max_images:
-                raise ImageInputError("这次的图片数量太多啦，请分开让小花记住喵")
-            total_bytes += len(data)
-            if total_bytes > self.limits.max_total_bytes:
-                raise ImageInputError("这组图片加起来太大啦，请缩小后再发送喵")
-            await asyncio.to_thread(_validate_image, data, self.limits)
-            seen.add(digest)
-            result.append(data)
-        return result
+    async def _resolve_image(self, segment: Dict[str, Any]) -> bytes:
+        data = await self._load_segment(segment)
+        if len(data) > self.limits.max_image_bytes:
+            raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+        await asyncio.to_thread(validate_image, data, self.limits)
+        return data
 
     async def _load_segment(self, segment: Dict[str, Any]) -> bytes:
         encoded = segment.get("binary_data_base64")
