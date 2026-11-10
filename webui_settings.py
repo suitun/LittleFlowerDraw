@@ -14,6 +14,7 @@ from pydantic import field_validator, model_validator
 from .command_registry import COMMAND_IDS, COMMAND_SPECS
 from .drawing_patterns import validate_templates as validate_drawing_templates
 from .role_patterns import (
+    normalize_reply_variants,
     validate_drawing_count_reply,
     validate_drawing_error_reply,
     validate_drawing_reply,
@@ -29,26 +30,31 @@ CommandId = Literal.__getitem__(COMMAND_IDS)
 
 
 class GuardReplyConfig(PluginConfigBase):
-    whitelist_denied: str = Field(
-        default="这里还不是小花能营业的地方呢，先请管理员把这里加进白名单吧喵～",
-        max_length=2000,
+    whitelist_denied: List[str] = Field(
+        default_factory=lambda: ["这里还不是小花能营业的地方呢，先请管理员把这里加进白名单吧喵～"],
         description="群聊或私聊不在白名单、且白名单已开启时的回复。",
     )
-    admin_only: str = Field(
-        default="这个指令只有管理员才能用哦，小花不能偷偷听别人的话喵～",
-        max_length=2000,
+    admin_only: List[str] = Field(
+        default_factory=lambda: ["这个指令只有管理员才能用哦，小花不能偷偷听别人的话喵～"],
         description="非管理员使用仅管理员指令时的回复。",
     )
-    quota_exceeded: str = Field(
-        default="「{指令}」的次数用完啦，{重置时间}后再来找小花玩吧喵～",
-        max_length=2000,
+    quota_exceeded: List[str] = Field(
+        default_factory=lambda: ["「{指令}」的次数用完啦，{重置时间}后再来找小花玩吧喵～"],
         description="次数用完时的回复，支持 {指令}、{重置时间}。",
     )
 
+    @field_validator("*", mode="before")
+    @classmethod
+    def normalize_variants(cls, value: object) -> List[str]:
+        return normalize_reply_variants(value)
+
     @field_validator("*")
     @classmethod
-    def validate_templates(cls, value: str) -> str:
-        return validate_guard_reply(value)
+    def validate_templates(cls, values: List[str]) -> List[str]:
+        result = [validate_guard_reply(value) for value in values if value.strip()]
+        if not result:
+            raise ValueError("权限提示至少需要一条非空内容")
+        return result
 
 
 class AccessConfig(PluginConfigBase):
@@ -151,61 +157,68 @@ class DrawingConfig(PluginConfigBase):
     )
     min_group_roles: int = Field(default=3, ge=3, le=8, description="多人替换最少角色数。")
     max_group_roles: int = Field(default=8, ge=3, le=8, description="多人替换最多角色数。")
-    missing_reference_reply: str = Field(
-        default="画图需要一张参考图哦，请附图或引用一条有图的消息喵～",
-        max_length=2000,
+    missing_reference_reply: List[str] = Field(
+        default_factory=lambda: ["画图需要一张参考图哦，请附图或引用一条有图的消息喵～"],
         description="绘图消息没有参考图时的回复。",
     )
-    missing_role_reply: str = Field(
-        default="小花还不认识「{角色名}」呢，先把 TA 登记进角色库吧喵～",
-        max_length=2000,
+    missing_role_reply: List[str] = Field(
+        default_factory=lambda: ["小花还不认识「{角色名}」呢，先把 TA 登记进角色库吧喵～"],
         description="绘图引用的角色不存在时的回复。",
     )
-    group_count_reply: str = Field(
-        default="多人替换需要 {最少}-{最多} 个角色喵～",
-        max_length=2000,
+    group_count_reply: List[str] = Field(
+        default_factory=lambda: ["多人替换需要 {最少}-{最多} 个角色喵～"],
         description="多人替换角色数量超出范围时的回复。",
     )
-    api_missing_reply: str = Field(
-        default="绘图 API 还没配置好，请先在「小花绘 → 绘图 API」填写 URL 和 Token 喵～",
-        max_length=2000,
+    api_missing_reply: List[str] = Field(
+        default_factory=lambda: ["绘图 API 还没配置好，请先在「小花绘 → 绘图 API」填写 URL 和 Token 喵～"],
         description="绘图 API 未配置时的回复。",
     )
-    api_error_reply: str = Field(
-        default="绘图 API 调用失败：{错误}",
-        max_length=2000,
+    api_error_reply: List[str] = Field(
+        default_factory=lambda: ["绘图 API 调用失败：{错误}"],
         description="绘图 API 调用失败时的回复，支持 {错误}。",
     )
-    success_reply: str = Field(
-        default="小花画好啦喵～类型：{类型}；角色：{角色数量} 个。",
-        max_length=2000,
-        description="绘图成功时的回复，支持 {类型}、{角色数量}。",
+    completion_reply: List[str] = Field(
+        default_factory=lambda: ["任务 #{任务ID} 画好啦喵～"],
+        description="任务成功时的短回复；只显示任务编号和短文案。",
     )
-    submitted_reply: str = Field(
-        default="任务 #{任务ID} 收到啦喵～前面还有 {排队数} 个。",
-        max_length=2000,
+    submitted_reply: List[str] = Field(
+        default_factory=lambda: ["任务 #{任务ID} 收到啦喵～前面还有 {排队数} 个。"],
         description="任务入队后的回复，支持 {任务ID}、{排队数}。",
     )
-    active_task_reply: str = Field(
-        default="你还有任务 #{任务ID} 在画喵～等它完成再来吧。",
-        max_length=2000,
+    active_task_reply: List[str] = Field(
+        default_factory=lambda: ["你还有任务 #{任务ID} 在画喵～等它完成再来吧。"],
         description="用户已有进行中任务时的回复，支持 {任务ID}。",
     )
-    queue_full_reply: str = Field(
-        default="排队的小花太多啦，稍后再来喵～",
-        max_length=2000,
+    queue_full_reply: List[str] = Field(
+        default_factory=lambda: ["排队的小花太多啦，稍后再来喵～"],
         description="任务队列已满时的回复。",
     )
-    duplicate_task_reply: str = Field(
-        default="这个任务已经提交过啦喵～",
-        max_length=2000,
+    duplicate_task_reply: List[str] = Field(
+        default_factory=lambda: ["这个任务已经提交过啦喵～"],
         description="重复消息再次提交任务时的回复。",
     )
-    task_failed_reply: str = Field(
-        default="任务 #{任务ID} 画失败了喵…{错误}",
-        max_length=2000,
+    task_failed_reply: List[str] = Field(
+        default_factory=lambda: ["任务 #{任务ID} 画失败了喵…{错误}"],
         description="任务失败时的回复，支持 {任务ID}、{错误}。",
     )
+
+    @field_validator(
+        "missing_reference_reply",
+        "missing_role_reply",
+        "group_count_reply",
+        "api_missing_reply",
+        "api_error_reply",
+        "completion_reply",
+        "submitted_reply",
+        "active_task_reply",
+        "queue_full_reply",
+        "duplicate_task_reply",
+        "task_failed_reply",
+        mode="before",
+    )
+    @classmethod
+    def normalize_reply_fields(cls, value: object) -> List[str]:
+        return normalize_reply_variants(value)
 
     @field_validator("replace_templates")
     @classmethod
@@ -227,53 +240,72 @@ class DrawingConfig(PluginConfigBase):
 
     @field_validator("missing_role_reply")
     @classmethod
-    def validate_missing_role(cls, value: str) -> str:
-        return validate_reply(value)
+    def validate_missing_role(cls, values: List[str]) -> List[str]:
+        return [validate_reply(value) for value in values if value.strip()]
 
     @field_validator("group_count_reply")
     @classmethod
-    def validate_group_count(cls, value: str) -> str:
-        return validate_drawing_count_reply(value)
+    def validate_group_count(cls, values: List[str]) -> List[str]:
+        return [validate_drawing_count_reply(value) for value in values if value.strip()]
 
     @field_validator("api_missing_reply")
     @classmethod
-    def validate_api_missing(cls, value: str) -> str:
-        return validate_reply(value)
+    def validate_api_missing(cls, values: List[str]) -> List[str]:
+        return [validate_reply(value) for value in values if value.strip()]
 
     @field_validator("api_error_reply")
     @classmethod
-    def validate_api_error(cls, value: str) -> str:
-        return validate_drawing_error_reply(value)
+    def validate_api_error(cls, values: List[str]) -> List[str]:
+        return [validate_drawing_error_reply(value) for value in values if value.strip()]
 
-    @field_validator("success_reply")
+    @field_validator("completion_reply")
     @classmethod
-    def validate_success(cls, value: str) -> str:
-        return validate_drawing_reply(value)
+    def validate_completion(cls, values: List[str]) -> List[str]:
+        return [validate_task_reply(value) for value in values if value.strip()]
 
     @field_validator("submitted_reply", "active_task_reply")
     @classmethod
-    def validate_task_template(cls, value: str) -> str:
-        return validate_task_reply(value)
+    def validate_task_template(cls, values: List[str]) -> List[str]:
+        return [validate_task_reply(value) for value in values if value.strip()]
 
     @field_validator("queue_full_reply")
     @classmethod
-    def validate_queue_full(cls, value: str) -> str:
-        return validate_reply(value)
+    def validate_queue_full(cls, values: List[str]) -> List[str]:
+        return [validate_reply(value) for value in values if value.strip()]
 
     @field_validator("duplicate_task_reply")
     @classmethod
-    def validate_duplicate_task(cls, value: str) -> str:
-        return validate_reply(value)
+    def validate_duplicate_task(cls, values: List[str]) -> List[str]:
+        return [validate_reply(value) for value in values if value.strip()]
 
     @field_validator("task_failed_reply")
     @classmethod
-    def validate_task_failed(cls, value: str) -> str:
-        return validate_task_fail_reply(value)
+    def validate_task_failed(cls, values: List[str]) -> List[str]:
+        return [validate_task_fail_reply(value) for value in values if value.strip()]
 
     @field_validator("missing_reference_reply")
     @classmethod
-    def validate_missing_reference(cls, value: str) -> str:
-        return validate_reply(value)
+    def validate_missing_reference(cls, values: List[str]) -> List[str]:
+        return [validate_reply(value) for value in values if value.strip()]
+
+    @model_validator(mode="after")
+    def ensure_replies_present(self) -> "DrawingConfig":
+        for name in (
+            "missing_reference_reply",
+            "missing_role_reply",
+            "group_count_reply",
+            "api_missing_reply",
+            "api_error_reply",
+            "completion_reply",
+            "submitted_reply",
+            "active_task_reply",
+            "queue_full_reply",
+            "duplicate_task_reply",
+            "task_failed_reply",
+        ):
+            if not getattr(self, name):
+                raise ValueError(f"{name} 至少需要一条回复")
+        return self
 
     @model_validator(mode="after")
     def validate_group_range(self) -> "DrawingConfig":

@@ -31,7 +31,7 @@
       "value": "palette"
     }
   },
-  "capabilities": ["send.text", "send.image", "chat.open_session", "message.get_by_id", "api.get", "api.call", "webui.claim_upload"],
+  "capabilities": ["send.text", "send.image", "send.hybrid", "chat.open_session", "message.get_by_id", "api.get", "api.call", "webui.claim_upload"],
   "i18n": {
     "default_locale": "zh-CN"
   }

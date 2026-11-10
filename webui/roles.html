@@ -51,28 +51,69 @@
     .settings-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
     #settings-status { min-height: 22px; font-size: 14px; }
     #api-status { min-height: 22px; font-size: 14px; }
-    #settings-status.error, #api-status.error, .error { color: var(--maibot-danger); }
+    #replies-status { min-height: 22px; font-size: 14px; }
+    #settings-status.error, #api-status.error, #replies-status.error, .error { color: var(--maibot-danger); }
     .placeholder { padding: 48px 20px; text-align: center; color: var(--maibot-muted); border: 1px dashed var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
-    .task-list { display: grid; gap: 10px; }
-    .task-card { padding: 14px 16px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
-    .task-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
-    .task-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .task-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
+    .task-card { display: grid; grid-template-columns: 152px minmax(0, 1fr); padding: 0; overflow: hidden; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); transition: border-color .15s ease, transform .15s ease; }
+    .task-card:hover { border-color: color-mix(in srgb, var(--maibot-primary) 45%, var(--maibot-border)); transform: translateY(-1px); }
+    .task-cover { position: relative; min-height: 152px; background: linear-gradient(135deg, var(--maibot-soft), var(--maibot-background)); overflow: hidden; }
+    .task-cover img { width: 100%; height: 100%; min-height: 152px; object-fit: cover; display: block; }
+    .task-cover-placeholder { height: 100%; min-height: 152px; display: grid; place-items: center; padding: 12px; color: var(--maibot-muted); font-size: 13px; text-align: center; }
+    .task-cover-badge { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 999px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, .58); backdrop-filter: blur(4px); }
+    .task-body { min-width: 0; padding: 13px 14px; display: flex; flex-direction: column; gap: 7px; }
+    .task-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+    .task-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
     .task-id { font-weight: 700; font-size: 16px; }
     .task-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: var(--maibot-soft); color: var(--maibot-muted); }
+    .task-badge.queued { color: #3b6ea8; background: rgba(59, 110, 168, 0.14); }
     .task-badge.running { color: #b86b00; background: rgba(255, 170, 0, 0.14); }
     .task-badge.succeeded { color: #20854e; background: rgba(32, 133, 78, 0.14); }
     .task-badge.failed { color: var(--maibot-danger); background: rgba(200, 50, 50, 0.12); }
     .task-badge.cancelled { color: var(--maibot-muted); background: var(--maibot-soft); }
-    .task-meta { margin-top: 6px; color: var(--maibot-muted); font-size: 13px; overflow-wrap: anywhere; }
-    .task-prompt { margin-top: 8px; color: var(--maibot-muted); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .task-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-    .task-actions .maibot-button { padding: 5px 10px; font-size: 13px; }
-    .task-check { display: inline-flex; align-items: center; gap: 6px; color: var(--maibot-muted); font-size: 13px; }
-    .task-check input { width: 16px; height: 16px; }
+    .task-meta { color: var(--maibot-muted); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+    .task-meta strong { color: var(--maibot-text); font-weight: 600; }
+    .task-meta-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+    .task-chip { padding: 1px 7px; border-radius: 999px; background: var(--maibot-soft); font-size: 11.5px; color: var(--maibot-muted); }
+    .task-prompt { color: var(--maibot-muted); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .task-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: auto; padding-top: 2px; }
+    .task-actions .maibot-button { padding: 4px 9px; font-size: 12.5px; }
+    .task-check { display: inline-flex; align-items: center; gap: 5px; color: var(--maibot-muted); font-size: 12px; }
+    .task-check input { width: 15px; height: 15px; }
     .task-bulk-actions { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
-    .task-detail-grid { display: grid; gap: 8px; margin: 10px 0; }
-    .task-detail-label { color: var(--maibot-muted); font-size: 13px; }
-    .task-detail-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .task-detail-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); gap: 20px; align-items: start; }
+    .task-detail-hero { border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-background); overflow: hidden; display: grid; place-items: center; min-height: 280px; }
+    .task-detail-hero img { width: 100%; max-height: 68vh; object-fit: contain; display: block; }
+    .task-detail-hero .preview-missing { padding: 40px 20px; text-align: center; color: var(--maibot-muted); }
+    .task-detail-caption { margin-top: 8px; color: var(--maibot-muted); font-size: 12.5px; }
+    .task-detail-side { display: grid; gap: 14px; min-width: 0; }
+    .task-detail-side h3 { margin: 0; font-size: 15px; }
+    .meta-list { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 14px; margin: 0; font-size: 13.5px; }
+    .meta-list dt { color: var(--maibot-muted); white-space: nowrap; }
+    .meta-list dd { margin: 0; overflow-wrap: anywhere; }
+    .task-detail-label { color: var(--maibot-muted); font-size: 12.5px; margin-top: 10px; }
+    .task-detail-value { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.55; }
+    .task-detail-reference { display: grid; gap: 6px; }
+    .task-detail-reference img { width: 100%; max-height: 180px; object-fit: contain; border: 1px solid var(--maibot-border); border-radius: 8px; background: var(--maibot-background); }
+    @media (max-width: 760px) {
+      .task-list { grid-template-columns: 1fr; }
+      .task-card { grid-template-columns: 118px minmax(0, 1fr); }
+      .task-cover, .task-cover img, .task-cover-placeholder { min-height: 118px; }
+      .task-detail-layout { grid-template-columns: 1fr; }
+    }
+    .reply-groups { display: grid; gap: 18px; }
+    .reply-section { padding: 16px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
+    .reply-section h3 { margin: 0 0 4px; font-size: 16px; }
+    .reply-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 12px; }
+    .reply-card { padding: 12px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-background); }
+    .reply-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .reply-card-title { font-weight: 600; }
+    .reply-card-hint { color: var(--maibot-muted); font-size: 12px; overflow-wrap: anywhere; }
+    .reply-variants { display: grid; gap: 8px; margin-top: 8px; }
+    .reply-variant { display: flex; gap: 6px; align-items: flex-start; }
+    .reply-variant textarea { flex: 1; min-height: 54px; resize: vertical; font-family: inherit; }
+    .reply-variant .reply-remove { flex: none; padding: 5px 9px; }
+    .reply-add { margin-top: 8px; padding: 5px 10px; font-size: 13px; }
     #status { min-height: 22px; font-size: 14px; }
     #status.error { color: var(--maibot-danger); }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
@@ -90,8 +131,8 @@
     .empty code { font-family: var(--maibot-font-mono, monospace); color: var(--maibot-foreground); }
     .pager { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 20px; }
     .modal { position: fixed; inset: 0; z-index: 50; padding: 20px; background: rgba(0, 0, 0, 0.55); display: grid; place-items: center; overflow: auto; }
-    .modal-card { width: min(760px, 100%); max-height: 90vh; overflow: auto; padding: 20px; background: var(--maibot-surface); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); }
-    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .modal-card { width: min(1120px, 96vw); max-height: 92vh; overflow: auto; padding: 24px; background: var(--maibot-surface); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; position: sticky; top: 0; z-index: 2; padding-bottom: 10px; background: var(--maibot-surface); }
     .preview-wrap { display: grid; place-items: center; min-height: 160px; margin-bottom: 14px; background: var(--maibot-background); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); overflow: hidden; }
     .preview-wrap img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; }
     .preview-missing { padding: 24px; color: var(--maibot-muted); text-align: center; }
@@ -126,6 +167,7 @@
   <nav class="module-nav" aria-label="小花绘模块">
     <button type="button" data-module="roles" class="active">角色库</button>
     <button type="button" data-module="settings">插件设置</button>
+    <button type="button" data-module="replies">回复配置</button>
     <button type="button" data-module="draw">当前任务</button>
     <button type="button" data-module="history">任务历史</button>
     <button type="button" data-module="api">绘图 API</button>
@@ -180,27 +222,10 @@
       </fieldset>
 
       <fieldset class="settings-card">
-        <legend>角色库回复</legend>
-        <div class="settings-grid">
-          <label class="settings-field">首次登记<textarea id="setting-reply-registered" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">同名覆盖<textarea id="setting-reply-overwritten" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">查看前文案<textarea id="setting-reply-view" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">没有找到<textarea id="setting-reply-not-found" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">缺少图片<textarea id="setting-reply-missing-image" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">名字不合法<textarea id="setting-reply-invalid-name" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">图片不合法<textarea id="setting-reply-invalid-image" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">队列忙<textarea id="setting-reply-busy" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">内部错误<textarea id="setting-reply-error" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-        </div>
-        <p class="muted">角色回复只支持 {角色名}；查看前文案留空时只发图片。</p>
-      </fieldset>
-
-      <fieldset class="settings-card">
         <legend>角色库限制</legend>
         <div class="settings-grid">
           <label class="settings-field">角色名最大字符数<input id="setting-max-name-length" class="maibot-input" type="number" min="1" max="256"></label>
-          <label class="settings-field">单图最大 MB<input id="setting-max-image-mb" class="maibot-input" type="number" min="1" max="8"></label>
-          <label class="settings-field">单图最大像素数<input id="setting-max-pixels" class="maibot-input" type="number" min="1" max="80000000"></label>
+          <label class="settings-field">单图最大 MB<input id="setting-max-image-mb" class="maibot-input" type="number" min="1" max="32"></label>
         </div>
       </fieldset>
 
@@ -232,12 +257,6 @@
         <div class="settings-grid">
           <label class="settings-field">多人最少角色数<input id="setting-drawing-min-roles" class="maibot-input" type="number" min="3" max="8"></label>
           <label class="settings-field">多人最多角色数<input id="setting-drawing-max-roles" class="maibot-input" type="number" min="3" max="8"></label>
-          <label class="settings-field">没有参考图<textarea id="setting-drawing-missing-reference" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">角色不存在<textarea id="setting-drawing-missing-role" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">人数超出范围<textarea id="setting-drawing-group-count" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">画好了<textarea id="setting-drawing-success" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">API 未配置<textarea id="setting-drawing-api-missing" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
-          <label class="settings-field">API 调用失败<textarea id="setting-drawing-api-error" class="maibot-input reply-text" rows="2" maxlength="2000"></textarea></label>
         </div>
       </fieldset>
 
@@ -281,24 +300,28 @@
         <div id="policy-list" class="policy-list"></div>
       </fieldset>
 
-      <fieldset class="settings-card">
-        <legend>提示文案</legend>
-        <label class="settings-field">白名单拒绝
-          <input id="setting-whitelist-reply" class="maibot-input" type="text" maxlength="2000">
-        </label>
-        <label class="settings-field">仅管理员
-          <input id="setting-admin-reply" class="maibot-input" type="text" maxlength="2000">
-        </label>
-        <label class="settings-field">次数用完（支持 {指令}、{重置时间}）
-          <input id="setting-quota-reply" class="maibot-input" type="text" maxlength="2000">
-        </label>
-      </fieldset>
-
       <div class="settings-footer">
         <p id="settings-status" role="status" aria-live="polite"></p>
         <button id="settings-save" class="maibot-button maibot-button-primary" type="button">保存设置</button>
       </div>
     </form>
+  </section>
+
+  <section id="module-replies" class="module" hidden>
+    <div class="module-head">
+      <div>
+        <h2>回复配置</h2>
+        <p class="muted">按模块管理回复文案；每种回复可以配置多条，触发时随机抽取一条。</p>
+      </div>
+      <div class="actions">
+        <button id="replies-refresh" class="maibot-button" type="button">刷新</button>
+      </div>
+    </div>
+    <div id="reply-groups" class="reply-groups"></div>
+    <div class="settings-footer">
+      <p id="replies-status" role="status" aria-live="polite"></p>
+      <button id="replies-save" class="maibot-button maibot-button-primary" type="button">保存回复配置</button>
+    </div>
   </section>
 
   <section id="module-draw" class="module" hidden>
@@ -329,7 +352,7 @@
           <option value="failed">失败</option>
           <option value="cancelled">已取消</option>
         </select>
-        <input id="history-query" class="maibot-input" type="search" placeholder="任务 ID / 发起人 / 角色" aria-label="搜索任务">
+        <input id="history-query" class="maibot-input" type="search" placeholder="任务 ID / QQ / 昵称 / 角色" aria-label="搜索任务">
         <button id="history-refresh" class="maibot-button" type="button">刷新</button>
       </div>
     </div>
@@ -442,6 +465,7 @@
   const moduleButtons = [...document.querySelectorAll(".module-nav button")];
   const modules = [...document.querySelectorAll(".module")];
   let settingsLoaded = false;
+  let settingsData = null;
   let apiLoaded = false;
   let apiModels = [];
   let currentTasksLoading = false;
@@ -529,6 +553,34 @@
       loadThumbnail(entry.target.dataset.name, entry.target);
     }
   }, { rootMargin: "200px" });
+
+  const taskThumbnailCache = new Map();
+  const taskThumbnailObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      taskThumbnailObserver.unobserve(entry.target);
+      void loadTaskImage(entry.target);
+    }
+  }, { rootMargin: "300px" });
+
+  async function loadTaskImage(image) {
+    const taskId = image.dataset.taskId;
+    const kind = image.dataset.kind;
+    const key = `${taskId}:${kind}`;
+    if (taskThumbnailCache.has(key)) {
+      image.src = taskThumbnailCache.get(key);
+      return;
+    }
+    try {
+      const result = await request("query", "task_thumbnail", { task_id: Number(taskId), kind });
+      if (!result.image) throw new Error(result.error || "预览不可用");
+      taskThumbnailCache.set(key, result.image);
+      image.src = result.image;
+    } catch (error) {
+      const cover = image.closest(".task-cover");
+      if (cover) cover.replaceChildren(make("div", "task-cover-placeholder", error.message || String(error)));
+    }
+  }
 
   function clearThumbnailCache() {
     thumbnailCache.clear();
@@ -856,6 +908,7 @@
         const result = await uploadRequest("role_image", file, { name }, {
           onProgress: percent => { progress.textContent = `正在上传… ${percent}%`; }
         });
+        if (result.error) throw new Error(result.error);
         clearThumbnailCache();
         closeModal();
         await load(1);
@@ -983,18 +1036,8 @@
   function fillSettings(settings) {
     document.querySelector("#setting-register-templates").value = settings.keywords.register_templates.join("\n");
     document.querySelector("#setting-view-templates").value = settings.keywords.view_templates.join("\n");
-    document.querySelector("#setting-reply-registered").value = settings.replies.registered;
-    document.querySelector("#setting-reply-overwritten").value = settings.replies.overwritten;
-    document.querySelector("#setting-reply-view").value = settings.replies.view;
-    document.querySelector("#setting-reply-not-found").value = settings.replies.not_found;
-    document.querySelector("#setting-reply-missing-image").value = settings.replies.missing_image;
-    document.querySelector("#setting-reply-invalid-name").value = settings.replies.invalid_name;
-    document.querySelector("#setting-reply-invalid-image").value = settings.replies.invalid_image;
-    document.querySelector("#setting-reply-busy").value = settings.replies.busy;
-    document.querySelector("#setting-reply-error").value = settings.replies.error;
     document.querySelector("#setting-max-name-length").value = String(settings.library.max_name_length);
     document.querySelector("#setting-max-image-mb").value = String(settings.library.max_image_mb);
-    document.querySelector("#setting-max-pixels").value = String(settings.library.max_pixels);
     document.querySelector("#setting-drawing-replace-templates").value = settings.drawing.replace_templates.join("\n");
     document.querySelector("#setting-drawing-together-templates").value = settings.drawing.together_templates.join("\n");
     document.querySelector("#setting-drawing-group-templates").value = settings.drawing.group_templates.join("\n");
@@ -1003,12 +1046,6 @@
     document.querySelector("#setting-drawing-group-prompt").value = settings.drawing.group_prompt;
     document.querySelector("#setting-drawing-min-roles").value = String(settings.drawing.min_group_roles);
     document.querySelector("#setting-drawing-max-roles").value = String(settings.drawing.max_group_roles);
-    document.querySelector("#setting-drawing-missing-reference").value = settings.drawing.missing_reference_reply;
-    document.querySelector("#setting-drawing-missing-role").value = settings.drawing.missing_role_reply;
-    document.querySelector("#setting-drawing-group-count").value = settings.drawing.group_count_reply;
-    document.querySelector("#setting-drawing-success").value = settings.drawing.success_reply;
-    document.querySelector("#setting-drawing-api-missing").value = settings.drawing.api_missing_reply;
-    document.querySelector("#setting-drawing-api-error").value = settings.drawing.api_error_reply;
     document.querySelector("#setting-queue-concurrent").value = String(settings.task_queue.max_concurrent_tasks);
     document.querySelector("#setting-queue-waiting").value = String(settings.task_queue.max_waiting_tasks);
     document.querySelector("#setting-queue-timeout").value = String(settings.task_queue.task_timeout_seconds);
@@ -1020,9 +1057,6 @@
     document.querySelector("#setting-whitelist").checked = settings.access.whitelist_enabled;
     document.querySelector("#setting-groups").value = settings.access.group_whitelist.join("\n");
     document.querySelector("#setting-private").value = settings.access.private_whitelist.join("\n");
-    document.querySelector("#setting-whitelist-reply").value = settings.guard_replies.whitelist_denied;
-    document.querySelector("#setting-admin-reply").value = settings.guard_replies.admin_only;
-    document.querySelector("#setting-quota-reply").value = settings.guard_replies.quota_exceeded;
     renderPolicies(settings.commands.policies);
   }
 
@@ -1040,6 +1074,7 @@
     setSettingsStatus("正在加载设置…");
     try {
       const settings = await request("query", "settings");
+      settingsData = settings;
       fillSettings(settings);
       settingsLoaded = true;
       setSettingsStatus("");
@@ -1055,21 +1090,9 @@
         register_templates: parseTemplateList(document.querySelector("#setting-register-templates").value),
         view_templates: parseTemplateList(document.querySelector("#setting-view-templates").value)
       },
-      replies: {
-        registered: document.querySelector("#setting-reply-registered").value,
-        overwritten: document.querySelector("#setting-reply-overwritten").value,
-        view: document.querySelector("#setting-reply-view").value,
-        not_found: document.querySelector("#setting-reply-not-found").value,
-        missing_image: document.querySelector("#setting-reply-missing-image").value,
-        invalid_name: document.querySelector("#setting-reply-invalid-name").value,
-        invalid_image: document.querySelector("#setting-reply-invalid-image").value,
-        busy: document.querySelector("#setting-reply-busy").value,
-        error: document.querySelector("#setting-reply-error").value
-      },
       library: {
         max_name_length: Number(document.querySelector("#setting-max-name-length").value),
-        max_image_mb: Number(document.querySelector("#setting-max-image-mb").value),
-        max_pixels: Number(document.querySelector("#setting-max-pixels").value)
+        max_image_mb: Number(document.querySelector("#setting-max-image-mb").value)
       },
       drawing: {
         replace_templates: parseTemplateList(document.querySelector("#setting-drawing-replace-templates").value),
@@ -1079,13 +1102,7 @@
         together_prompt: document.querySelector("#setting-drawing-together-prompt").value,
         group_prompt: document.querySelector("#setting-drawing-group-prompt").value,
         min_group_roles: Number(document.querySelector("#setting-drawing-min-roles").value),
-        max_group_roles: Number(document.querySelector("#setting-drawing-max-roles").value),
-        missing_reference_reply: document.querySelector("#setting-drawing-missing-reference").value,
-        missing_role_reply: document.querySelector("#setting-drawing-missing-role").value,
-        group_count_reply: document.querySelector("#setting-drawing-group-count").value,
-        success_reply: document.querySelector("#setting-drawing-success").value,
-        api_missing_reply: document.querySelector("#setting-drawing-api-missing").value,
-        api_error_reply: document.querySelector("#setting-drawing-api-error").value
+        max_group_roles: Number(document.querySelector("#setting-drawing-max-roles").value)
       },
       task_queue: {
         max_concurrent_tasks: Number(document.querySelector("#setting-queue-concurrent").value),
@@ -1102,17 +1119,16 @@
         group_whitelist: parseIdList(document.querySelector("#setting-groups").value),
         private_whitelist: parseIdList(document.querySelector("#setting-private").value)
       },
-      commands: {policies: collectPolicies()},
-      guard_replies: {
-        whitelist_denied: document.querySelector("#setting-whitelist-reply").value,
-        admin_only: document.querySelector("#setting-admin-reply").value,
-        quota_exceeded: document.querySelector("#setting-quota-reply").value
-      }
+      commands: {policies: collectPolicies()}
     };
     button.disabled = true;
     setSettingsStatus("正在保存…");
     try {
-      await request("action", "save_settings", {settings_json: JSON.stringify(payload)});
+      const result = await request("action", "save_settings", {settings_json: JSON.stringify(payload)});
+      if (result.error) {
+        setSettingsStatus(result.error, true);
+        return;
+      }
       settingsLoaded = false;
       await loadSettings();
       setSettingsStatus("设置已保存，新消息立即生效");
@@ -1123,16 +1139,173 @@
     }
   }
 
-  function activateModule(name) {
-    for (const button of moduleButtons) button.classList.toggle("active", button.dataset.module === name);
-    for (const section of modules) section.hidden = section.id !== `module-${name}`;
-    if (name === "settings") void loadSettings();
+  const REPLY_GROUPS = [
+    {
+      title: "角色库回复",
+      description: "登记、查看和图片校验相关回复；每条支持对应占位符。",
+      source: "replies",
+      fields: [
+        ["registered", "首次登记", "支持 {角色名}"],
+        ["overwritten", "同名覆盖", "支持 {角色名}"],
+        ["view", "查看前文案", "支持 {角色名}；留空则只发图片"],
+        ["not_found", "没有找到角色", "支持 {角色名}"],
+        ["missing_image", "缺少图片", "支持 {角色名}"],
+        ["invalid_name", "名字不合法", "支持 {角色名}"],
+        ["invalid_image", "其他图片错误", "支持 {原因}"],
+        ["image_too_large", "图片太大", "支持 {实际大小}、{大小限制}"],
+        ["image_invalid_format", "格式不支持", "支持 {格式}"],
+        ["image_corrupt", "图片损坏", "不需要占位符"],
+        ["busy", "队列忙", "支持 {角色名}"],
+        ["error", "内部错误", "支持 {角色名}"]
+      ]
+    },
+    {
+      title: "绘图任务回复",
+      description: "任务提交、排队、失败和完成时的回复。",
+      source: "drawing",
+      fields: [
+        ["submitted_reply", "提交成功", "支持 {任务ID}、{排队数}"],
+        ["active_task_reply", "已有进行中任务", "支持 {任务ID}"],
+        ["queue_full_reply", "队列已满", "不需要占位符"],
+        ["duplicate_task_reply", "重复提交", "不需要占位符"],
+        ["missing_reference_reply", "缺少参考图", "不需要占位符"],
+        ["missing_role_reply", "角色不存在", "支持 {角色名}"],
+        ["group_count_reply", "多人数量超限", "支持 {最少}、{最多}"],
+        ["api_missing_reply", "API 未配置", "不需要占位符"],
+        ["api_error_reply", "API 调用失败", "支持 {错误}"],
+        ["task_failed_reply", "任务失败", "支持 {任务ID}、{错误}"],
+        ["completion_reply", "任务完成", "支持 {任务ID}"]
+      ]
+    },
+    {
+      title: "权限提示文案",
+      description: "白名单、权限和次数限制相关提示。",
+      source: "guard_replies",
+      fields: [
+        ["whitelist_denied", "白名单拒绝", "不需要占位符"],
+        ["admin_only", "仅管理员", "不需要占位符"],
+        ["quota_exceeded", "次数用完", "支持 {指令}、{重置时间}"]
+      ]
+    }
+  ];
+
+  function setReplyStatus(message, isError = false) {
+    const node = document.querySelector("#replies-status");
+    node.textContent = message || "";
+    node.className = isError ? "error" : "muted";
+  }
+
+  function updateReplyRemoveButtons(card) {
+    const rows = card.querySelectorAll(".reply-variant");
+    rows.forEach((row, index) => {
+      const button = row.querySelector(".reply-remove");
+      button.disabled = rows.length === 1;
+      button.title = rows.length === 1 ? "至少保留一条回复" : `删除第 ${index + 1} 条`;
+    });
+  }
+
+  function addReplyVariant(card, value = "") {
+    const variants = card.querySelector(".reply-variants");
+    const row = make("div", "reply-variant");
+    const textarea = make("textarea", "maibot-input reply-text");
+    textarea.rows = 2;
+    textarea.maxLength = 2000;
+    textarea.value = value;
+    const remove = make("button", "maibot-button reply-remove", "删除");
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      if (card.querySelectorAll(".reply-variant").length <= 1) return;
+      row.remove();
+      updateReplyRemoveButtons(card);
+    });
+    row.append(textarea, remove);
+    variants.append(row);
+    updateReplyRemoveButtons(card);
+    return textarea;
+  }
+
+  function renderReplies(settings) {
+    const container = document.querySelector("#reply-groups");
+    container.replaceChildren();
+    for (const group of REPLY_GROUPS) {
+      const section = make("section", "reply-section");
+      section.append(make("h3", "", group.title));
+      section.append(make("p", "muted", group.description));
+      const grid = make("div", "reply-grid");
+      for (const [key, label, hint] of group.fields) {
+        const card = make("div", "reply-card");
+        card.dataset.source = group.source;
+        card.dataset.key = key;
+        const head = make("div", "reply-card-head");
+        head.append(make("span", "reply-card-title", label));
+        head.append(make("span", "reply-card-hint", hint));
+        card.append(head);
+        const variants = make("div", "reply-variants");
+        card.append(variants);
+        const values = settings[group.source] && Array.isArray(settings[group.source][key])
+          ? settings[group.source][key]
+          : [];
+        for (const value of values.length ? values : [""]) addReplyVariant(card, value);
+        const add = make("button", "maibot-button reply-add", "＋ 添加一条");
+        add.type = "button";
+        add.addEventListener("click", () => {
+          const textarea = addReplyVariant(card);
+          textarea.focus();
+        });
+        card.append(add);
+        grid.append(card);
+      }
+      section.append(grid);
+      container.append(section);
+    }
+  }
+
+  async function loadReplies() {
+    setReplyStatus("正在加载回复配置…");
+    try {
+      const settings = await request("query", "settings");
+      settingsData = settings;
+      renderReplies(settings);
+      setReplyStatus("");
+    } catch (error) {
+      setReplyStatus(error.message || String(error), true);
+    }
+  }
+
+  async function saveReplies() {
+    if (!settingsData) await loadReplies();
+    if (!settingsData) return;
+    const next = structuredClone(settingsData);
+    for (const card of document.querySelectorAll(".reply-card")) {
+      const source = card.dataset.source;
+      const key = card.dataset.key;
+      next[source][key] = [...card.querySelectorAll(".reply-variant textarea")].map(node => node.value);
+    }
+    const button = document.querySelector("#replies-save");
+    button.disabled = true;
+    setReplyStatus("正在保存回复配置…");
+    try {
+      const result = await request("action", "save_settings", {settings_json: JSON.stringify(next)});
+      if (result.error) {
+        setReplyStatus(result.error, true);
+        return;
+      }
+      settingsData = next;
+      settingsLoaded = false;
+      renderReplies(next);
+      setReplyStatus("回复配置已保存，新消息立即生效");
+    } catch (error) {
+      setReplyStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   function activateModule(name) {
     for (const button of moduleButtons) button.classList.toggle("active", button.dataset.module === name);
     for (const section of modules) section.hidden = section.id !== `module-${name}`;
     if (name === "settings") void loadSettings();
+    if (name === "replies") void loadReplies();
     if (name === "api") void loadDrawingApi();
     if (name === "draw") void loadCurrentTasks();
     if (name === "history") void loadTaskHistory(1);
@@ -1301,13 +1474,34 @@
     node.className = isError ? "error" : "muted";
   }
 
+  function taskRequesterName(task) {
+    return task.requester_group_name || task.requester_qq_name || task.requester_id || "—";
+  }
+
   function taskCard(task, history = false) {
     const card = make("div", "task-card");
+    const previewKind = task.output_available ? "output" : task.reference_available ? "reference" : "";
+    const cover = make("div", "task-cover");
+    if (previewKind) {
+      const image = make("img");
+      image.alt = previewKind === "output" ? `任务 #${task.id} 的成品图` : `任务 #${task.id} 的参考图`;
+      image.loading = "lazy";
+      image.dataset.taskId = String(task.id);
+      image.dataset.kind = previewKind;
+      cover.append(image);
+      cover.append(make("span", "task-cover-badge", previewKind === "output" ? "成品图" : "参考图"));
+      taskThumbnailObserver.observe(image);
+    } else {
+      cover.append(make("div", "task-cover-placeholder", "暂无预览"));
+    }
+    card.append(cover);
+
+    const body = make("div", "task-body");
     const head = make("div", "task-card-head");
     const title = make("div", "task-title");
     title.append(make("span", "task-id", `#${task.id}`));
     title.append(make("span", `task-badge ${task.status}`, TASK_STATUS[task.status] || task.status));
-    if (task.stage) title.append(make("span", "muted", `阶段：${task.stage}`));
+    if (task.stage) title.append(make("span", "task-chip", task.stage));
     head.append(title);
 
     const actions = make("div", "task-actions");
@@ -1339,21 +1533,27 @@
       retryButton.addEventListener("click", () => void retryTask(task.id));
       actions.append(retryButton);
     }
-    head.append(actions);
-    card.append(head);
+    body.append(head);
 
-    const roleText = (task.role_names || []).join("、") || "—";
-    const meta = [
-      `发起人：${task.requester_id}`,
-      `类型：${TASK_KIND[task.kind] || task.command_id}`,
-      `角色：${roleText}`,
-      `创建：${formatTime(task.created_at)}`
-    ];
-    if (task.status === "queued" && task.queue_position > 0) meta.push(`前面还有 ${task.queue_position} 个`);
-    if (task.started_at) meta.push(`开始：${formatTime(task.started_at)}`);
-    if (task.finished_at) meta.push(`结束：${formatTime(task.finished_at)}`);
-    card.append(make("div", "task-meta", meta.join(" · ")));
-    if (task.error) card.append(make("div", "task-prompt error", task.error));
+    const meta = make("div", "task-meta");
+    const requester = document.createElement("strong");
+    requester.textContent = taskRequesterName(task);
+    meta.append("发起人：", requester, `（${task.requester_id}）`);
+    body.append(meta);
+
+    const chips = make("div", "task-meta-chips");
+    chips.append(make("span", "task-chip", TASK_KIND[task.kind] || task.command_id));
+    for (const name of (task.role_names || [])) chips.append(make("span", "task-chip", name));
+    body.append(chips);
+
+    const timeline = [`创建：${formatTime(task.created_at)}`];
+    if (task.status === "queued" && task.queue_position > 0) timeline.push(`前面还有 ${task.queue_position} 个`);
+    if (task.started_at) timeline.push(`开始：${formatTime(task.started_at)}`);
+    if (task.finished_at) timeline.push(`结束：${formatTime(task.finished_at)}`);
+    body.append(make("div", "task-meta", timeline.join(" · ")));
+    if (task.error) body.append(make("div", "task-prompt error", task.error));
+    body.append(actions);
+    card.append(body);
     return card;
   }
 
@@ -1364,6 +1564,7 @@
     try {
       const result = await request("query", "current_tasks");
       const list = document.querySelector("#current-list");
+      taskThumbnailObserver.disconnect();
       list.replaceChildren();
       const paused = result.config && result.config.queue_paused ? " · 队列已暂停" : "";
       setTaskStatus(
@@ -1398,6 +1599,7 @@
       historyPages = result.pages;
       historySelected.clear();
       const list = document.querySelector("#history-list");
+      taskThumbnailObserver.disconnect();
       list.replaceChildren();
       setTaskStatus("#history-stats", `共 ${result.total} 个历史任务`);
       if (!result.tasks.length) {
@@ -1414,16 +1616,72 @@
     }
   }
 
+  async function taskPreviewElement(taskId, kind, alt) {
+    const wrap = make("div", "task-detail-hero");
+    try {
+      const thumb = await request("query", "task_thumbnail", {task_id: taskId, kind, size: "detail"});
+      if (thumb.image) {
+        const image = make("img");
+        image.src = thumb.image;
+        image.alt = alt;
+        wrap.append(image);
+      } else {
+        wrap.append(make("div", "preview-missing", thumb.error || "没有可预览的图片"));
+      }
+    } catch (error) {
+      wrap.append(make("div", "preview-missing", error.message || String(error)));
+    }
+    return wrap;
+  }
+
   async function showTaskDetail(taskId) {
     openModal(`任务 #${taskId}`, make("p", "muted", "正在加载任务详情…"));
     try {
       const task = await request("query", "task_detail", {task_id: taskId});
-      const body = make("div");
+      const layout = make("div", "task-detail-layout");
+      const visual = make("div");
+      const previewKind = task.output_available ? "output" : task.reference_available ? "reference" : "";
+      if (previewKind) {
+        visual.append(await taskPreviewElement(
+          taskId,
+          previewKind,
+          previewKind === "output" ? `任务 #${taskId} 的成品图` : `任务 #${taskId} 的参考图`
+        ));
+        visual.append(make("div", "task-detail-caption", previewKind === "output" ? "成品图" : "参考图"));
+      } else {
+        const empty = make("div", "task-detail-hero");
+        empty.append(make("div", "preview-missing", "这个任务还没有可展示的图片"));
+        visual.append(empty);
+      }
+      if (task.output_available && task.reference_available) {
+        const reference = make("div", "task-detail-reference");
+        reference.append(make("div", "task-detail-label", "参考图"));
+        try {
+          const thumb = await request("query", "task_thumbnail", {task_id: taskId, kind: "reference", size: "detail"});
+          if (thumb.image) {
+            const image = make("img");
+            image.src = thumb.image;
+            image.alt = `任务 #${taskId} 的参考图`;
+            reference.append(image);
+            visual.append(reference);
+          }
+        } catch (_) {
+          // 参考图缺失不影响成品图展示。
+        }
+      }
+      layout.append(visual);
+
+      const side = make("div", "task-detail-side");
+      side.append(make("h3", "", "任务信息"));
       const meta = make("dl", "meta-list");
+      const requester = taskRequesterName(task);
       const rows = [
         ["状态", `${TASK_STATUS[task.status] || task.status}${task.stage ? `（${task.stage}）` : ""}`],
+        ["发起人", `${requester}（${task.requester_id}）`],
+        ["群昵称", task.requester_group_name || "—"],
+        ["QQ 昵称", task.requester_qq_name || "—"],
+        ["QQ 号", task.requester_id],
         ["类型", TASK_KIND[task.kind] || task.command_id],
-        ["发起人", task.requester_id],
         ["角色", (task.role_names || []).join("、") || "—"],
         ["排队位置", task.queue_position || "—"],
         ["创建时间", formatTime(task.created_at)],
@@ -1436,38 +1694,20 @@
         meta.append(make("dt", "", label));
         meta.append(make("dd", "", value));
       }
-      body.append(meta);
-      body.append(make("div", "task-detail-label", "最终提示词"));
-      body.append(make("div", "task-detail-value", task.final_prompt || "—"));
+      side.append(meta);
+
+      side.append(make("div", "task-detail-label", "最终提示词"));
+      side.append(make("div", "task-detail-value", task.final_prompt || "—"));
       if (task.extra_prompt) {
-        body.append(make("div", "task-detail-label", "额外提示词"));
-        body.append(make("div", "task-detail-value", task.extra_prompt));
+        side.append(make("div", "task-detail-label", "额外提示词"));
+        side.append(make("div", "task-detail-value", task.extra_prompt));
       }
       if (task.error) {
-        body.append(make("div", "task-detail-label", "错误"));
-        body.append(make("div", "task-detail-value error", task.error));
+        side.append(make("div", "task-detail-label", "错误"));
+        side.append(make("div", "task-detail-value error", task.error));
       }
-      if (task.output_available) {
-        body.append(make("div", "task-detail-label", "生成图片"));
-        const wrap = make("div", "preview-wrap");
-        wrap.append(make("p", "muted", "正在加载预览…"));
-        body.append(wrap);
-        try {
-          const thumb = await request("query", "task_thumbnail", {task_id: taskId});
-          wrap.replaceChildren();
-          if (thumb.image) {
-            const image = make("img");
-            image.src = thumb.image;
-            image.alt = `任务 #${taskId} 的生成图片`;
-            wrap.append(image);
-          } else {
-            wrap.append(make("p", "preview-missing", thumb.error || "没有可预览的图片"));
-          }
-        } catch (error) {
-          wrap.replaceChildren(make("p", "preview-missing", error.message || String(error)));
-        }
-      }
-      modalBody.replaceChildren(body);
+      layout.append(side);
+      modalBody.replaceChildren(layout);
     } catch (error) {
       modalBody.replaceChildren(make("p", "error", error.message || String(error)));
     }
@@ -1538,6 +1778,8 @@
     button.addEventListener("click", () => activateModule(button.dataset.module));
   }
   document.querySelector("#settings-save").addEventListener("click", saveSettings);
+  document.querySelector("#replies-refresh").addEventListener("click", () => void loadReplies());
+  document.querySelector("#replies-save").addEventListener("click", saveReplies);
   document.querySelector("#api-save").addEventListener("click", saveDrawingApi);
   document.querySelector("#api-models").addEventListener("click", fetchDrawingModels);
   document.querySelector("#current-refresh").addEventListener("click", () => void loadCurrentTasks());

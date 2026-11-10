@@ -13,7 +13,7 @@ import unittest
 from PIL import Image
 
 import role_messages
-from role_messages import ImageInputError, ImageLimits, MessageImageResolver, MissingImageError, get_message_text
+from role_messages import ImageInputError, ImageLimits, MessageImageResolver, MissingImageError, get_message_text, validate_image
 
 
 def image_bytes(color: str = "red", image_format: str = "PNG") -> bytes:
@@ -200,10 +200,9 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
         message = {"raw_message": [image_segment(self.red), image_segment(self.blue)]}
         self.assertEqual(await MessageImageResolver(self.ctx, ImageLimits()).resolve(message, "chat"), self.red)
 
-    async def test_individual_size_pixel_limit_format_and_corruption_are_rejected(self) -> None:
+    async def test_individual_size_format_and_corruption_are_rejected(self) -> None:
         cases = [
             (self.red, ImageLimits(max_image_bytes=len(self.red) - 1)),
-            (self.red, ImageLimits(max_pixels=3)),
             (image_bytes(image_format="BMP"), ImageLimits()),
             (b"this is not an image", ImageLimits()),
             (self.red[:-8], ImageLimits()),
@@ -211,6 +210,12 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
         for data, limits in cases:
             with self.subTest(size=len(data), limits=limits), self.assertRaises(ImageInputError):
                 await MessageImageResolver(self.ctx, limits).resolve({"raw_message": [image_segment(data)]}, "chat")
+
+    def test_image_size_and_format_errors_give_specific_cute_reasons(self) -> None:
+        with self.assertRaisesRegex(ImageInputError, "超过.*MB.*压缩"):
+            validate_image(self.red, ImageLimits(max_image_bytes=len(self.red) - 1))
+        with self.assertRaisesRegex(ImageInputError, "BMP.*只记得住"):
+            validate_image(image_bytes(image_format="BMP"), ImageLimits())
 
     async def test_corrupt_base64_is_not_replaced_with_a_quoted_image(self) -> None:
         message = quoted_message()

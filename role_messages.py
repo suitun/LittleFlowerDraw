@@ -40,16 +40,44 @@ class _ImageFetchError(ImageInputError):
     """已确定的图片来源暂时不可读取。"""
 
 
+class ImageTooLargeError(ImageInputError):
+    """图片文件超过体积上限。"""
+
+    def __init__(self, actual_bytes: int, max_bytes: int) -> None:
+        self.actual_bytes = actual_bytes
+        self.max_bytes = max_bytes
+        super().__init__(_too_large_message(actual_bytes, max_bytes))
+
+
+class UnsupportedImageFormatError(ImageInputError):
+    """图片格式不在允许列表中。"""
+
+    def __init__(self, image_format: str) -> None:
+        self.image_format = image_format
+        super().__init__(f"这张图片是 {image_format} 格式，小花只记得住 PNG、JPEG、WebP 和 GIF 喵～")
+
+
+class CorruptImageError(ImageInputError):
+    """图片无法解码或损坏。"""
+
+
 @dataclass(frozen=True)
 class ImageLimits:
-    """单张角色图片的体积与像素上限。"""
+    """单张角色图片的体积上限。"""
 
     max_image_bytes: int = 8 * 1024**2
-    max_pixels: int = 40_000_000
 
     def __post_init__(self) -> None:
-        if min(self.max_image_bytes, self.max_pixels) <= 0:
-            raise ValueError("图片体积和像素限制必须大于零")
+        if self.max_image_bytes <= 0:
+            raise ValueError("图片体积限制必须大于零")
+
+
+def _too_large_message(actual_bytes: Optional[int], max_bytes: int) -> str:
+    limit_mb = max_bytes / 1024**2
+    if actual_bytes is None:
+        return f"这张图片超过小花能记住的 {limit_mb:.1f}MB 啦，压缩一下再发喵～"
+    actual_mb = actual_bytes / 1024**2
+    return f"这张图片有 {actual_mb:.1f}MB，超过小花能记住的 {limit_mb:.1f}MB 啦，压缩一下再发喵～"
 
 
 def get_message_text(message: Dict[str, Any]) -> str:
@@ -120,7 +148,7 @@ def _decode_base64(value: str, max_bytes: int) -> bytes:
     if value.startswith("base64://"):
         value = value[len("base64://"):]
     if len(value) > ((max_bytes + 2) // 3) * 4:
-        raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+        raise ImageTooLargeError(max_bytes + 1, max_bytes)
     try:
         data = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError):
@@ -128,29 +156,30 @@ def _decode_base64(value: str, max_bytes: int) -> bytes:
     if not data:
         raise MissingImageError("这张图片没有内容，请重新发送图片喵")
     if len(data) > max_bytes:
-        raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+        raise ImageTooLargeError(len(data), max_bytes)
     return data
 
 
 def validate_image(data: bytes, limits: ImageLimits) -> None:
     if len(data) > limits.max_image_bytes:
-        raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+        raise ImageTooLargeError(len(data), limits.max_image_bytes)
     try:
         with Image.open(io.BytesIO(data)) as image:
             if image.format not in _ALLOWED_FORMATS:
-                raise ImageInputError("小花只认识 PNG、JPEG、WebP 和 GIF 图片喵")
-            if image.width <= 0 or image.height <= 0 or image.width * image.height > limits.max_pixels:
-                raise ImageInputError("这张图片的像素太多啦，请缩小后再发送喵")
+                format_name = str(image.format or "未知")
+                raise UnsupportedImageFormatError(format_name)
+            if image.width <= 0 or image.height <= 0:
+                raise ImageInputError("这张图片尺寸怪怪的，小花读不懂，请换一张喵～")
             image.verify()
         # verify 不解码像素；再读首帧，避免将截断图片写入图库。
         with Image.open(io.BytesIO(data)) as image:
             image.load()
     except Image.DecompressionBombError:
-        raise ImageInputError("这张图片的像素太多啦，请缩小后再发送喵") from None
+        raise ImageInputError("这张图片尺寸太大啦，小花的内存装不下，请换一张小一点的喵～") from None
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as error:
         if isinstance(error, ImageInputError):
             raise
-        raise ImageInputError("图片好像损坏了，小花看不清，请换一张图片喵") from None
+        raise CorruptImageError("图片好像损坏了，小花看不清，请换一张图片喵") from None
 
 
 def _validate_image_url(url: str) -> str:
@@ -203,7 +232,7 @@ def _download_image(url: str, max_bytes: int) -> bytes:
                     if declared_length < 0:
                         raise ImageInputError("图片下载返回了无效长度，请重新发送图片喵")
                     if declared_length > max_bytes:
-                        raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+                        raise ImageTooLargeError(declared_length, max_bytes)
                 result = bytearray()
                 while True:
                     if time.monotonic() > deadline:
@@ -213,7 +242,7 @@ def _download_image(url: str, max_bytes: int) -> bytes:
                         break
                     result.extend(chunk)
                     if len(result) > max_bytes:
-                        raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+                        raise ImageTooLargeError(len(result), max_bytes)
                 if declared_length is not None and len(result) != declared_length:
                     raise _ImageFetchError("图片没有下载完整，请重新发送图片喵")
                 if not result:
@@ -245,13 +274,13 @@ def _read_local_image(reference: str, max_bytes: int) -> bytes:
         raise ImageInputError("QQ 客户端返回的本地图片路径无效，请直接附图喵")
     try:
         if path.stat().st_size > max_bytes:
-            raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+            raise ImageTooLargeError(path.stat().st_size, max_bytes)
         with path.open("rb") as handle:
             data = handle.read(max_bytes + 1)
     except OSError:
         raise _ImageFetchError("QQ 客户端的图片文件暂时读不到，请直接附图喵") from None
     if len(data) > max_bytes:
-        raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+        raise ImageTooLargeError(len(data), max_bytes)
     if not data:
         raise MissingImageError("这张图片没有内容，请重新发送图片喵")
     return data
@@ -303,7 +332,7 @@ class MessageImageResolver:
     async def _resolve_image(self, segment: Dict[str, Any]) -> bytes:
         data = await self._load_segment(segment)
         if len(data) > self.limits.max_image_bytes:
-            raise ImageInputError("这张图片太大啦，请缩小后再让小花记住喵")
+            raise ImageTooLargeError(len(data), self.limits.max_image_bytes)
         await asyncio.to_thread(validate_image, data, self.limits)
         return data
 

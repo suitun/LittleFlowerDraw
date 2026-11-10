@@ -42,6 +42,8 @@ _ROW_COLUMNS = (
     "created_at",
     "started_at",
     "finished_at",
+    "requester_group_name",
+    "requester_qq_name",
 )
 _SELECT_TASK_SQL = f"SELECT {', '.join(_ROW_COLUMNS)} FROM drawing_tasks"
 _CREATE_SCHEMA_SQL = """
@@ -77,7 +79,9 @@ CREATE TABLE IF NOT EXISTS drawing_tasks (
     output_path TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     started_at INTEGER NOT NULL DEFAULT 0,
-    finished_at INTEGER NOT NULL DEFAULT 0
+    finished_at INTEGER NOT NULL DEFAULT 0,
+    requester_group_name TEXT NOT NULL DEFAULT '',
+    requester_qq_name TEXT NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_task_per_user
@@ -91,8 +95,8 @@ _INSERT_TASK_SQL = """
 INSERT INTO drawing_tasks (
     id, status, stage, command_id, kind, requester_id, group_id, account_id, scope,
     source_message_id, source_key, role_names_json, extra_prompt, final_prompt,
-    reference_path, api_model, api_size, created_at
-) VALUES (?, 'queued', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    reference_path, api_model, api_size, created_at, requester_group_name, requester_qq_name
+) VALUES (?, 'queued', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -126,6 +130,8 @@ class TaskRecord:
     created_at: int
     started_at: int
     finished_at: int
+    requester_group_name: str = ""
+    requester_qq_name: str = ""
 
 
 class TaskStoreError(RuntimeError):
@@ -181,6 +187,8 @@ def _row_to_record(row: Sequence[object]) -> TaskRecord:
         created_at=int(row[23]),
         started_at=int(row[24]),
         finished_at=int(row[25]),
+        requester_group_name=str(row[26]),
+        requester_qq_name=str(row[27]),
     )
 
 
@@ -195,6 +203,12 @@ class DrawingTaskStore:
         with self._connection() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(_CREATE_SCHEMA_SQL)
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(drawing_tasks)")}
+            for column in ("requester_group_name", "requester_qq_name"):
+                if column not in columns:
+                    connection.execute(
+                        f"ALTER TABLE drawing_tasks ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+                    )
             connection.execute("PRAGMA user_version = 1")
 
     @contextmanager
@@ -243,6 +257,8 @@ class DrawingTaskStore:
         command_id: str,
         kind: str,
         requester_id: str,
+        requester_group_name: str = "",
+        requester_qq_name: str = "",
         group_id: str,
         account_id: str,
         scope: str,
@@ -314,6 +330,8 @@ class DrawingTaskStore:
                         api_model,
                         api_size,
                         now,
+                        requester_group_name.strip(),
+                        requester_qq_name.strip(),
                     ),
                 )
                 connection.commit()
@@ -350,6 +368,8 @@ class DrawingTaskStore:
             created_at=now,
             started_at=0,
             finished_at=0,
+            requester_group_name=requester_group_name.strip(),
+            requester_qq_name=requester_qq_name.strip(),
         )
 
     def set_quota(self, task_id: int, window_start: int) -> None:
@@ -512,9 +532,10 @@ class DrawingTaskStore:
             pattern = f"%{_escape_like(query)}%"
             clauses.append(
                 "(CAST(id AS TEXT) LIKE ? ESCAPE '\\' OR requester_id LIKE ? ESCAPE '\\' "
+                "OR requester_group_name LIKE ? ESCAPE '\\' OR requester_qq_name LIKE ? ESCAPE '\\' "
                 "OR role_names_json LIKE ? ESCAPE '\\' OR command_id LIKE ? ESCAPE '\\')"
             )
-            parameters.extend([pattern] * 4)
+            parameters.extend([pattern] * 6)
         where = " AND ".join(clauses)
         with self._connection() as connection:
             total = int(

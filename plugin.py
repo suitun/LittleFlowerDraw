@@ -37,31 +37,55 @@ from .drawing_tasks import (
     TaskRecord,
 )
 from .role_messages import (
+    CorruptImageError,
     ImageInputError,
     ImageLimits,
+    ImageTooLargeError,
     MessageImageResolver,
     MissingImageError,
+    UnsupportedImageFormatError,
     get_message_text,
     validate_image,
 )
 from .role_patterns import (
     RoleRequest,
     match_request,
+    pick_reply,
     render_drawing_count_reply,
     render_drawing_error_reply,
     render_drawing_reply,
+    render_image_format_reply,
+    render_image_reason_reply,
+    render_image_size_reply,
     render_reply,
     render_task_fail_reply,
     render_task_reply,
     valid_role_name,
 )
 from .role_store import RoleStore
-from .role_webui import CACHE_DIR_NAME, data_url, detail_payload, list_payload, render_thumbnail, thumbnail_payload
+from .role_webui import (
+    CACHE_DIR_NAME,
+    data_url,
+    detail_payload,
+    list_payload,
+    render_preview,
+    render_thumbnail,
+    thumbnail_payload,
+)
 from .settings import LittleFlowerDrawConfig
 from .webui_settings import WebUISettings, WebUISettingsStore, load_legacy_settings
 
 
 GLOBAL_LIBRARY_SCOPE = "global"
+
+
+def _merge_settings(base: Dict[str, Any], updates: Dict[str, Any]) -> None:
+    """把 WebUI 提交的分组深度合并进当前设置，兼容旧页面缺少的新字段。"""
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge_settings(base[key], value)
+        else:
+            base[key] = value
 
 
 @dataclass(frozen=True)
@@ -314,7 +338,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 if stream_id:
                     try:
                         if isinstance(job, DrawingSubmitJob):
-                            await self._send_text(job.settings.replies.error, stream_id)
+                            await self._send_text(render_reply(job.settings.replies.error, ""), stream_id)
                         else:
                             await self._send_reply(job.settings.replies.error, stream_id, job.request.role_name)
                     except Exception:
@@ -387,7 +411,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         queue_config = settings.task_queue
         if queue_config.max_waiting_tasks > 0:
             if await asyncio.to_thread(task_store.count_queued) >= queue_config.max_waiting_tasks:
-                await self._send_text(settings.drawing.queue_full_reply, stream_id)
+                await self._send_text(render_reply(settings.drawing.queue_full_reply, ""), stream_id)
                 return False
 
         role_names = await self._drawing_role_names(candidate, settings, stream_id)
@@ -395,21 +419,20 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             return False
         limits = ImageLimits(
             max_image_bytes=settings.library.max_image_mb * 1024**2,
-            max_pixels=settings.library.max_pixels,
         )
         try:
             reference = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
         except MissingImageError:
-            await self._send_text(settings.drawing.missing_reference_reply, stream_id)
+            await self._send_text(render_reply(settings.drawing.missing_reference_reply, ""), stream_id)
             return False
-        except ImageInputError:
+        except ImageInputError as error:
             self.ctx.logger.warning("小花绘绘图参考图未通过校验", exc_info=True)
-            await self._send_reply(settings.replies.invalid_image, stream_id, "")
+            await self._send_text(self._image_error_text(settings, error), stream_id)
             return False
 
         api = await asyncio.to_thread(self._require_drawing_api_store().current)
         if not api.configured:
-            await self._send_text(settings.drawing.api_missing_reply, stream_id)
+            await self._send_text(render_reply(settings.drawing.api_missing_reply, ""), stream_id)
             return False
         base_prompt = {
             "replace": settings.drawing.replace_prompt,
@@ -432,6 +455,9 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 message_id or uuid.uuid4().hex,
             )
         )
+        user_info = job.message.get("message_info", {}).get("user_info", {})
+        requester_group_name = str(user_info.get("user_cardname") or "")
+        requester_qq_name = str(user_info.get("user_nickname") or "")
         try:
             async with self._task_submit_lock:
                 task = await asyncio.to_thread(
@@ -439,6 +465,8 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                     command_id=job.command_id,
                     kind=candidate.kind,
                     requester_id=user_id,
+                    requester_group_name=requester_group_name,
+                    requester_qq_name=requester_qq_name,
                     group_id=group_id,
                     account_id=account_id,
                     scope=scope,
@@ -472,10 +500,10 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             )
             return False
         except QueueFullError:
-            await self._send_text(settings.drawing.queue_full_reply, stream_id)
+            await self._send_text(render_reply(settings.drawing.queue_full_reply, ""), stream_id)
             return False
         except DuplicateTaskError:
-            await self._send_text(settings.drawing.duplicate_task_reply, stream_id)
+            await self._send_text(render_reply(settings.drawing.duplicate_task_reply, ""), stream_id)
             return False
 
         position = await asyncio.to_thread(task_store.queue_position, task.id)
@@ -604,17 +632,8 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         )
         await asyncio.to_thread(task_store.set_stage, task.id, "saving")
         path = await asyncio.to_thread(self._save_drawing_image, result.image, task.kind)
-        if not await self.ctx.send.image(base64.b64encode(result.image).decode("ascii"), stream_id):
-            raise ReplyDeliveryError("绘图结果发送失败")
+        await self._send_completion(task, stream_id, result.image)
         await asyncio.to_thread(task_store.succeed, task.id, str(path))
-        await self._send_text(
-            render_drawing_reply(
-                self._settings_store.current().drawing.success_reply,
-                DRAWING_KIND_LABELS[task.kind],
-                len(task.role_names),
-            ),
-            stream_id,
-        )
         self.ctx.logger.info(
             "小花绘任务 #%s 完成：类型=%s 角色=%s 输出=%s",
             task.id,
@@ -622,6 +641,25 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             "、".join(task.role_names),
             path,
         )
+
+    async def _send_completion(self, task: TaskRecord, stream_id: str, image: bytes) -> None:
+        """用一条图文混合消息 @ 发起人，发送短完成文案和结果图。"""
+        settings = self._settings_store.current() if self._settings_store is not None else None
+        template = (
+            pick_reply(settings.drawing.completion_reply)
+            if settings is not None
+            else "任务 #{任务ID} 画好啦喵～"
+        )
+        text = render_task_reply(template, task.id)
+        if "{任务ID}" not in template:
+            text = f"任务 #{task.id} {text}"
+        segments = [
+            {"type": "at", "data": {"target_user_id": task.requester_id}},
+            {"type": "text", "data": text},
+            {"type": "image", "content": base64.b64encode(image).decode("ascii")},
+        ]
+        if not await self.ctx.send.hybrid(segments, stream_id):
+            raise ReplyDeliveryError("绘图结果发送失败")
 
     async def _refund_task(self, task: TaskRecord) -> None:
         if not task.quota_counted or task.quota_refunded:
@@ -692,16 +730,15 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         if job.request.action == "register":
             limits = ImageLimits(
                 max_image_bytes=settings.library.max_image_mb * 1024**2,
-                max_pixels=settings.library.max_pixels,
             )
             try:
                 image = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
             except MissingImageError:
                 await self._send_reply(settings.replies.missing_image, stream_id, role_name)
                 return False
-            except ImageInputError:
+            except ImageInputError as error:
                 self.ctx.logger.warning("小花绘登记图片未通过校验", exc_info=True)
-                await self._send_reply(settings.replies.invalid_image, stream_id, role_name)
+                await self._send_text(self._image_error_text(settings, error), stream_id)
                 return False
             owner_id = str(job.message["message_info"]["user_info"]["user_id"])
             overwritten = await self._save_role(store, role_name, owner_id, image)
@@ -739,6 +776,22 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
     async def _send_reply(self, template: str, stream_id: str, role_name: str) -> None:
         await self._send_text(render_reply(template, role_name), stream_id)
 
+    @staticmethod
+    def _image_error_text(settings: WebUISettings, error: ImageInputError) -> str:
+        if isinstance(error, ImageTooLargeError):
+            return render_image_size_reply(
+                settings.replies.image_too_large,
+                f"{error.actual_bytes / 1024**2:.1f}MB",
+                f"{error.max_bytes / 1024**2:.1f}MB",
+            )
+        if isinstance(error, UnsupportedImageFormatError):
+            return render_image_format_reply(settings.replies.image_invalid_format, error.image_format)
+        if isinstance(error, CorruptImageError):
+            return pick_reply(settings.replies.image_corrupt)
+        template = pick_reply(settings.replies.invalid_image)
+        text = render_image_reason_reply(template, str(error))
+        return text if "{原因}" in template else f"{text}：{error}"
+
     def _require_store(self) -> RoleStore:
         if self._store is None:
             raise RuntimeError("角色库尚未初始化")
@@ -768,6 +821,8 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             "command_id": record.command_id,
             "kind": record.kind,
             "requester_id": record.requester_id,
+            "requester_group_name": record.requester_group_name,
+            "requester_qq_name": record.requester_qq_name,
             "group_id": record.group_id,
             "role_names": record.role_names,
             "created_at": record.created_at,
@@ -796,19 +851,16 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         try:
             raw = json.loads(settings_json)
         except json.JSONDecodeError:
-            raise ValueError("设置数据不是有效的 JSON") from None
-        if not isinstance(raw, dict) or not {
-            "keywords",
-            "replies",
-            "library",
-            "drawing",
-            "task_queue",
-            "access",
-            "commands",
-            "guard_replies",
-        } <= raw.keys():
-            raise ValueError("设置数据缺少必要分组")
-        settings = WebUISettings.model_validate(raw)
+            return {"saved": False, "error": "设置数据不是有效的 JSON"}
+        if not isinstance(raw, dict):
+            return {"saved": False, "error": "设置数据必须是 JSON 对象"}
+        current = await asyncio.to_thread(self._require_settings_store().current)
+        merged = current.model_dump(mode="json")
+        _merge_settings(merged, raw)
+        try:
+            settings = WebUISettings.model_validate(merged)
+        except ValueError as error:
+            return {"saved": False, "error": str(error)}
         await asyncio.to_thread(self._require_settings_store().save, settings)
         return {"saved": True}
 
@@ -929,6 +981,8 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                     command_id=old.command_id,
                     kind=old.kind,
                     requester_id=old.requester_id,
+                    requester_group_name=old.requester_group_name,
+                    requester_qq_name=old.requester_qq_name,
                     group_id=old.group_id,
                     account_id=old.account_id,
                     scope=old.scope,
@@ -969,14 +1023,25 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         deleted = await asyncio.to_thread(self._require_task_store().delete_tasks, ids)
         return {"deleted": deleted}
 
-    @API("webui_task_thumbnail", description="读取任务输出图的压缩缩略图", version="1")
-    async def webui_task_thumbnail(self, task_id: int) -> Dict[str, Any]:
+    @API("webui_task_thumbnail", description="读取任务输出图或参考图的压缩预览", version="1")
+    async def webui_task_thumbnail(
+        self, task_id: int, kind: str = "output", size: str = "card"
+    ) -> Dict[str, Any]:
         task = await asyncio.to_thread(self._require_task_store().get, task_id)
-        if task is None or not task.output_path or not Path(task.output_path).is_file():
+        if task is None:
+            return {"image": None, "error": "任务不存在"}
+        if kind == "reference":
+            path = task.reference_path
+        elif kind == "output":
+            path = task.output_path
+        else:
+            return {"image": None, "error": "不支持的图片类型"}
+        if not path or not Path(path).is_file():
             return {"image": None, "error": "任务没有可预览的图片"}
         try:
-            data = await asyncio.to_thread(Path(task.output_path).read_bytes)
-            thumb = await asyncio.to_thread(render_thumbnail, data)
+            data = await asyncio.to_thread(Path(path).read_bytes)
+            renderer = render_preview if size == "detail" else render_thumbnail
+            thumb = await asyncio.to_thread(renderer, data)
             return {"image": data_url(thumb)}
         except Exception as error:
             return {"image": None, "error": str(error)}
@@ -1037,12 +1102,13 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             image = await asyncio.to_thread(upload_path.read_bytes)
             limits = ImageLimits(
                 max_image_bytes=settings.library.max_image_mb * 1024**2,
-                max_pixels=settings.library.max_pixels,
             )
             await asyncio.to_thread(validate_image, image, limits)
             overwritten = await asyncio.to_thread(
                 self._require_store().save, GLOBAL_LIBRARY_SCOPE, name, "webui", image
             )
+        except ImageInputError as error:
+            return {"saved": False, "error": self._image_error_text(settings, error)}
         finally:
             await asyncio.to_thread(upload_path.unlink, missing_ok=True)
         return {"saved": True, "overwritten": overwritten}

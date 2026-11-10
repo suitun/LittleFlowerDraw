@@ -68,7 +68,9 @@
           "api": "webui_task_thumbnail",
           "version": "1",
           "parameters": {
-            "task_id": {"type": "integer", "minimum": 0, "maximum": 2147483647, "required": true}
+            "task_id": {"type": "integer", "minimum": 0, "maximum": 2147483647, "required": true},
+            "kind": {"type": "string", "choices": ["output", "reference"]},
+            "size": {"type": "string", "choices": ["card", "detail"]}
           }
         }
       },

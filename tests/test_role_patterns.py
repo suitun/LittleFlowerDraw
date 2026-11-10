@@ -6,6 +6,7 @@ from types import ModuleType
 
 import sys
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +55,13 @@ class RolePatternTests(unittest.TestCase):
         for text in ("{不存在}", "{角色名.__class__}", "{角色名[0]}", "{角色名!r}", "{图片数量}", "{"):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 settings.ReplyConfig(registered=text)
+
+    def test_reply_variants_are_selected_randomly(self):
+        variants = ["第一条 {角色名}", "第二条 {角色名}"]
+        with patch.object(patterns.random, "choice", return_value=variants[1]):
+            self.assertEqual(patterns.render_reply(variants, "小花"), "第二条 小花")
+        with self.assertRaises(ValueError):
+            patterns.pick_reply([])
 
     def test_plugin_config_only_keeps_core_section(self):
         from maibot_sdk.config import generate_plugin_config_schema

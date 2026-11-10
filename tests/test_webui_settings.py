@@ -74,13 +74,15 @@ class WebUISettingsTests(unittest.TestCase):
         self.assertEqual(loaded.access.admin_qq, "2685275264")
 
         loaded.access.admin_qq = "2999999999"
-        loaded.guard_replies.admin_only = "只有管理员可以哦"
+        loaded.guard_replies.admin_only = ["只有管理员可以哦"]
+        loaded.replies.registered = ["记住{角色名}了喵～", "好哒，记住{角色名}啦～"]
         store.save(loaded)
 
         reopened = webui_settings.WebUISettingsStore(self.data_dir)
         current = reopened.load()
         self.assertEqual(current.access.admin_qq, "2999999999")
-        self.assertEqual(current.guard_replies.admin_only, "只有管理员可以哦")
+        self.assertEqual(current.guard_replies.admin_only, ["只有管理员可以哦"])
+        self.assertEqual(current.replies.registered, ["记住{角色名}了喵～", "好哒，记住{角色名}啦～"])
         self.assertEqual(store.current().access.admin_qq, "2999999999")
 
     def test_legacy_config_sections_are_migrated(self) -> None:
@@ -117,7 +119,6 @@ registered = "记住{角色名}啦"
 [library]
 max_name_length = 20
 max_image_mb = 4
-max_pixels = 1000
 """,
             encoding="utf-8",
         )
@@ -130,9 +131,9 @@ max_pixels = 1000
         self.assertEqual(migrated.access.group_whitelist, ["10001"])
         self.assertTrue(migrated.access.whitelist_enabled)
         self.assertEqual(migrated.commands.policies[0].limit, 3)
-        self.assertEqual(migrated.guard_replies.admin_only, "旧配置提示")
+        self.assertEqual(migrated.guard_replies.admin_only, ["旧配置提示"])
         self.assertEqual(migrated.keywords.register_templates, ["记住 {角色名}"])
-        self.assertEqual(migrated.replies.registered, "记住{角色名}啦")
+        self.assertEqual(migrated.replies.registered, ["记住{角色名}啦"])
         self.assertEqual(migrated.library.max_name_length, 20)
         self.assertEqual(json.loads(store.path.read_text(encoding="utf-8"))["access"]["admin_qq"], "2685275264")
 
@@ -147,12 +148,12 @@ max_pixels = 1000
         legacy = {
             "keywords": {"register_templates": ["记住 {角色名}"], "view_templates": ["看看{角色名}"]},
             "replies": {"registered": "记住啦"},
-            "library": {"max_name_length": 30, "max_image_mb": 5, "max_pixels": 2000},
+            "library": {"max_name_length": 30, "max_image_mb": 5},
         }
         migrated = webui_settings.WebUISettingsStore(self.data_dir).load(legacy)
 
         self.assertEqual(migrated.keywords.view_templates, ["看看{角色名}"])
-        self.assertEqual(migrated.replies.registered, "记住啦")
+        self.assertEqual(migrated.replies.registered, ["记住啦"])
         self.assertEqual(migrated.library.max_image_mb, 5)
         self.assertEqual(migrated.access.admin_qq, "2685275264")
 

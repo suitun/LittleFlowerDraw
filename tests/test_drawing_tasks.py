@@ -70,6 +70,30 @@ class DrawingTaskStoreTests(unittest.TestCase):
             self.store.cancel(record.id)
         return record
 
+    def test_requester_names_persist_across_reopen(self) -> None:
+        record = self.store.create_task(
+            command_id="绘图",
+            kind="replace",
+            requester_id="user-name",
+            requester_group_name="群里的名字",
+            requester_qq_name="QQ 名字",
+            group_id="group-a",
+            account_id="account-a",
+            scope="group-a",
+            source_message_id="message-name",
+            source_key="message-name",
+            role_names=["小花"],
+            extra_prompt="",
+            final_prompt="画一只小花",
+            reference_image=b"reference-bytes",
+            api_model="gpt-image-1",
+            api_size="1024x1024",
+        )
+        reopened = DrawingTaskStore(self.data_dir).get(record.id)
+        self.assertIsNotNone(reopened)
+        self.assertEqual(reopened.requester_group_name, "群里的名字")
+        self.assertEqual(reopened.requester_qq_name, "QQ 名字")
+
     def test_task_ids_start_at_zero_and_never_rewind(self) -> None:
         ids = [
             make_task(self.store, requester_id=f"user-{index}", source_key=f"message-{index}").id

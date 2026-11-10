@@ -1,8 +1,9 @@
 """角色库触发模板与回复模板，不依赖聊天平台。"""
 
 from dataclasses import dataclass
-from typing import List, Optional, Pattern, Set
+from typing import Any, List, Optional, Pattern, Sequence, Set, Union
 
+import random
 import re
 import string
 import unicodedata
@@ -16,6 +17,9 @@ DRAWING_COUNT_FIELDS = {"最少", "最多"}
 DRAWING_ERROR_FIELDS = {"错误"}
 TASK_FIELDS = {"任务ID", "排队数"}
 TASK_FAIL_FIELDS = {"任务ID", "错误"}
+IMAGE_REASON_FIELDS = {"原因"}
+IMAGE_SIZE_FIELDS = {"实际大小", "大小限制"}
+IMAGE_FORMAT_FIELDS = {"格式"}
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,41 @@ def valid_role_name(name: str, max_length: int) -> bool:
     return bool(name) and len(name) <= max_length and not any(unicodedata.category(char) in {"Cc", "Cs"} for char in name)
 
 
+ReplyValue = Union[str, Sequence[str]]
+
+
+def pick_reply(value: ReplyValue) -> str:
+    """从一条或多条回复中随机抽一条；兼容旧的单字符串配置。"""
+    if isinstance(value, str):
+        return value
+    variants = list(value)
+    if not variants:
+        raise ValueError("回复配置至少需要一条内容")
+    return random.choice(variants)
+
+
+def normalize_reply_variants(value: Any, max_items: int = 50) -> List[str]:
+    """把旧版单字符串或 WebUI 列表统一成字符串列表。"""
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, (list, tuple)):
+        values = list(value)
+    else:
+        raise ValueError("回复配置必须是字符串或字符串列表")
+    if not values:
+        raise ValueError("每种回复至少需要一条内容")
+    if len(values) > max_items:
+        raise ValueError(f"每种回复最多配置 {max_items} 条")
+    result: List[str] = []
+    for item in values:
+        if not isinstance(item, str):
+            raise ValueError("回复内容必须是字符串")
+        if len(item) > 2000:
+            raise ValueError("单条回复不能超过 2000 字")
+        result.append(item)
+    return result
+
+
 def _validate_template_fields(template: str, allowed: Set[str], message: str) -> str:
     for _, field, format_spec, conversion in string.Formatter().parse(template):
         if field is not None and (field not in allowed or format_spec or conversion):
@@ -107,29 +146,53 @@ def validate_task_fail_reply(template: str) -> str:
     return _validate_template_fields(template, TASK_FAIL_FIELDS, "任务失败提示仅支持 {任务ID}、{错误}，不支持格式化指令")
 
 
-def render_reply(template: str, role_name: str = "") -> str:
-    return template.format_map({"角色名": role_name})
+def validate_image_reason_reply(template: str) -> str:
+    return _validate_template_fields(template, IMAGE_REASON_FIELDS, "图片错误提示仅支持 {原因}，不支持格式化指令")
 
 
-def render_guard_reply(template: str, command_name: str, reset_time: str) -> str:
-    return template.format_map({"指令": command_name, "重置时间": reset_time})
+def validate_image_size_reply(template: str) -> str:
+    return _validate_template_fields(template, IMAGE_SIZE_FIELDS, "图片大小提示仅支持 {实际大小}、{大小限制}，不支持格式化指令")
 
 
-def render_drawing_reply(template: str, drawing_type: str, role_count: int) -> str:
-    return template.format_map({"类型": drawing_type, "角色数量": role_count})
+def validate_image_format_reply(template: str) -> str:
+    return _validate_template_fields(template, IMAGE_FORMAT_FIELDS, "图片格式提示仅支持 {格式}，不支持格式化指令")
 
 
-def render_drawing_count_reply(template: str, minimum: int, maximum: int) -> str:
-    return template.format_map({"最少": minimum, "最多": maximum})
+def render_reply(template: ReplyValue, role_name: str = "") -> str:
+    return pick_reply(template).format_map({"角色名": role_name})
 
 
-def render_drawing_error_reply(template: str, error: str) -> str:
-    return template.format_map({"错误": error})
+def render_guard_reply(template: ReplyValue, command_name: str, reset_time: str) -> str:
+    return pick_reply(template).format_map({"指令": command_name, "重置时间": reset_time})
 
 
-def render_task_reply(template: str, task_id: int, queue_count: int = 0) -> str:
-    return template.format_map({"任务ID": task_id, "排队数": queue_count})
+def render_drawing_reply(template: ReplyValue, drawing_type: str, role_count: int) -> str:
+    return pick_reply(template).format_map({"类型": drawing_type, "角色数量": role_count})
 
 
-def render_task_fail_reply(template: str, task_id: int, error: str) -> str:
-    return template.format_map({"任务ID": task_id, "错误": error})
+def render_drawing_count_reply(template: ReplyValue, minimum: int, maximum: int) -> str:
+    return pick_reply(template).format_map({"最少": minimum, "最多": maximum})
+
+
+def render_drawing_error_reply(template: ReplyValue, error: str) -> str:
+    return pick_reply(template).format_map({"错误": error})
+
+
+def render_task_reply(template: ReplyValue, task_id: int, queue_count: int = 0) -> str:
+    return pick_reply(template).format_map({"任务ID": task_id, "排队数": queue_count})
+
+
+def render_task_fail_reply(template: ReplyValue, task_id: int, error: str) -> str:
+    return pick_reply(template).format_map({"任务ID": task_id, "错误": error})
+
+
+def render_image_reason_reply(template: ReplyValue, reason: str) -> str:
+    return pick_reply(template).format_map({"原因": reason})
+
+
+def render_image_size_reply(template: ReplyValue, actual: str, limit: str) -> str:
+    return pick_reply(template).format_map({"实际大小": actual, "大小限制": limit})
+
+
+def render_image_format_reply(template: ReplyValue, image_format: str) -> str:
+    return pick_reply(template).format_map({"格式": image_format})

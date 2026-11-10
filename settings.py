@@ -5,7 +5,14 @@ from typing import List
 from maibot_sdk import Field, PluginConfigBase
 from pydantic import field_validator, model_validator
 
-from .role_patterns import validate_reply, validate_trigger_groups
+from .role_patterns import (
+    normalize_reply_variants,
+    validate_image_format_reply,
+    validate_image_reason_reply,
+    validate_image_size_reply,
+    validate_reply,
+    validate_trigger_groups,
+)
 
 
 class PluginSectionConfig(PluginConfigBase):
@@ -42,20 +49,81 @@ class ReplyConfig(PluginConfigBase):
     __ui_icon__ = "heart"
     __ui_order__ = 2
 
-    registered: str = Field(default="小花记住{角色名}了喵～", max_length=2000, description="首次入库成功回复，支持 {角色名}。")
-    overwritten: str = Field(default="{角色名}的新模样，小花也记住了喵～", max_length=2000, description="同名覆盖成功回复。")
-    view: str = Field(default="找到{角色名}啦，给你看看喵～", max_length=2000, description="查看图片前的文字，留空只发图片。")
-    not_found: str = Field(default="小花还不认识{角色名}呢，先把 TA 介绍给小花吧喵～", max_length=2000, description="没有找到该角色时的回复。")
-    missing_image: str = Field(default="想记住{角色名}的话，要附上图片，或引用一条有图的消息哦喵～", max_length=2000, description="登记消息和引用目标都没有可用图片时的回复。")
-    invalid_name: str = Field(default="这个名字小花有点记不住，换个短一点的单行名字吧喵～", max_length=2000, description="角色名为空、过长或含控制字符时的回复。")
-    invalid_image: str = Field(default="这些图片暂时收不进图库喵，请检查图片格式、数量和大小后再试～", max_length=2000, description="图片损坏、格式不支持或超过限制时的回复。")
-    busy: str = Field(default="小花正忙着整理图库呢，稍等一下再叫小花吧喵～", max_length=2000, description="等待处理的请求过多时的回复。")
-    error: str = Field(default="小花整理图库时遇到一点问题，稍后再试试好不好喵～", max_length=2000, description="存储、引用查询或发送失败时的回复，具体原因写入日志。")
+    registered: List[str] = Field(default_factory=lambda: ["小花记住{角色名}了喵～"], description="首次入库成功回复，支持 {角色名}。")
+    overwritten: List[str] = Field(default_factory=lambda: ["{角色名}的新模样，小花也记住了喵～"], description="同名覆盖成功回复。")
+    view: List[str] = Field(default_factory=lambda: ["找到{角色名}啦，给你看看喵～"], description="查看图片前的文字，留空只发图片。")
+    not_found: List[str] = Field(default_factory=lambda: ["小花还不认识{角色名}呢，先把 TA 介绍给小花吧喵～"], description="没有找到该角色时的回复。")
+    missing_image: List[str] = Field(default_factory=lambda: ["想记住{角色名}的话，要附上图片，或引用一条有图的消息哦喵～"], description="登记消息和引用目标都没有可用图片时的回复。")
+    invalid_name: List[str] = Field(default_factory=lambda: ["这个名字小花有点记不住，换个短一点的单行名字吧喵～"], description="角色名为空、过长或含控制字符时的回复。")
+    invalid_image: List[str] = Field(default_factory=lambda: ["这张图片小花收不进去喵：{原因}"], description="其他图片错误的兜底回复，支持 {原因}。")
+    image_too_large: List[str] = Field(default_factory=lambda: ["这张图片有 {实际大小}，超过小花能记住的 {大小限制} 啦，压缩一下再发喵～"], description="图片体积超限回复，支持 {实际大小}、{大小限制}。")
+    image_invalid_format: List[str] = Field(default_factory=lambda: ["这张图片是 {格式} 格式，小花只记得住 PNG、JPEG、WebP 和 GIF 喵～"], description="图片格式不支持回复，支持 {格式}。")
+    image_corrupt: List[str] = Field(default_factory=lambda: ["图片好像损坏了，小花看不清，请换一张图片喵～"], description="图片损坏或无法解码时的回复。")
+    busy: List[str] = Field(default_factory=lambda: ["小花正忙着整理图库呢，稍等一下再叫小花吧喵～"], description="等待处理的请求过多时的回复。")
+    error: List[str] = Field(default_factory=lambda: ["小花整理图库时遇到一点问题，稍后再试试好不好喵～"], description="存储、引用查询或发送失败时的回复，具体原因写入日志。")
 
-    @field_validator("*")
+    @field_validator("*", mode="before")
     @classmethod
-    def validate_templates(cls, value: str) -> str:
-        return validate_reply(value)
+    def normalize_variants(cls, value: object) -> List[str]:
+        return normalize_reply_variants(value)
+
+    @field_validator(
+        "registered",
+        "overwritten",
+        "not_found",
+        "missing_image",
+        "invalid_name",
+        "busy",
+        "error",
+    )
+    @classmethod
+    def validate_role_templates(cls, values: List[str]) -> List[str]:
+        return [validate_reply(value) for value in values if value.strip()]
+
+    @field_validator("view")
+    @classmethod
+    def validate_view_templates(cls, values: List[str]) -> List[str]:
+        return [validate_reply(value) for value in values]
+
+    @field_validator("invalid_image")
+    @classmethod
+    def validate_invalid_image(cls, values: List[str]) -> List[str]:
+        return [validate_image_reason_reply(value) for value in values if value.strip()]
+
+    @field_validator("image_too_large")
+    @classmethod
+    def validate_image_too_large(cls, values: List[str]) -> List[str]:
+        return [validate_image_size_reply(value) for value in values if value.strip()]
+
+    @field_validator("image_invalid_format")
+    @classmethod
+    def validate_image_invalid_format(cls, values: List[str]) -> List[str]:
+        return [validate_image_format_reply(value) for value in values if value.strip()]
+
+    @field_validator("image_corrupt")
+    @classmethod
+    def validate_image_corrupt(cls, values: List[str]) -> List[str]:
+        return [validate_reply(value) for value in values if value.strip()]
+
+    @model_validator(mode="after")
+    def ensure_all_replies_present(self) -> "ReplyConfig":
+        for name in (
+            "registered",
+            "overwritten",
+            "view",
+            "not_found",
+            "missing_image",
+            "invalid_name",
+            "invalid_image",
+            "image_too_large",
+            "image_invalid_format",
+            "image_corrupt",
+            "busy",
+            "error",
+        ):
+            if not getattr(self, name):
+                raise ValueError(f"{name} 至少需要一条回复")
+        return self
 
 
 class LibraryConfig(PluginConfigBase):
@@ -64,8 +132,7 @@ class LibraryConfig(PluginConfigBase):
     __ui_order__ = 3
 
     max_name_length: int = Field(default=64, ge=1, le=256, description="角色名最多字符数。角色库全局共享，所有群和用户都可查看、登记及覆盖同名角色。")
-    max_image_mb: int = Field(default=8, ge=1, le=8, description="角色图片最大 MB；同时受主程序消息大小和图片处理设置限制。")
-    max_pixels: int = Field(default=40_000_000, ge=1, le=80_000_000, description="角色图片最大像素数（宽乘高）。")
+    max_image_mb: int = Field(default=8, ge=1, le=32, description="角色图片最大 MB；同时受主程序消息大小和图片处理设置限制。")
 
 
 class LittleFlowerDrawConfig(PluginConfigBase):
