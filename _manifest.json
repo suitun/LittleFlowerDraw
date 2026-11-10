@@ -20,7 +20,10 @@
     "min_version": "2.22.1",
     "max_version": "2.22.99"
   },
-  "dependencies": [],
+  "dependencies": [
+    {"type": "python_package", "name": "pillow", "version_spec": ">=12.3.0"},
+    {"type": "python_package", "name": "pydantic", "version_spec": ">=2.11.7,<3"}
+  ],
   "plugin_type": "game",
   "display": {
     "icon": {
@@ -28,7 +31,7 @@
       "value": "palette"
     }
   },
-  "capabilities": ["send.text"],
+  "capabilities": ["send.text", "send.image", "chat.open_session", "message.get_by_id", "api.get", "api.call"],
   "i18n": {
     "default_locale": "zh-CN"
   }
