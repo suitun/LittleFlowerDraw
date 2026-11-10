@@ -14,7 +14,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_order__ = 0
 
     enabled: bool = Field(default=False, description="是否启用小花绘")
-    config_version: str = Field(default="0.3.0", description="配置结构版本")
+    config_version: str = Field(default="0.5.0", description="配置结构版本")
 
 
 class KeywordConfig(PluginConfigBase):

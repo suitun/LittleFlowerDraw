@@ -1,7 +1,7 @@
 """角色库触发模板与回复模板，不依赖聊天平台。"""
 
 from dataclasses import dataclass
-from typing import List, Optional, Pattern
+from typing import List, Optional, Pattern, Set
 
 import re
 import string
@@ -10,6 +10,7 @@ import unicodedata
 
 ROLE_FIELD = "{角色名}"
 REPLY_FIELDS = {"角色名"}
+GUARD_FIELDS = {"指令", "重置时间"}
 
 
 @dataclass(frozen=True)
@@ -64,13 +65,26 @@ def valid_role_name(name: str, max_length: int) -> bool:
     return bool(name) and len(name) <= max_length and not any(unicodedata.category(char) in {"Cc", "Cs"} for char in name)
 
 
+def _validate_template_fields(template: str, allowed: Set[str], message: str) -> str:
+    for _, field, format_spec, conversion in string.Formatter().parse(template):
+        if field is not None and (field not in allowed or format_spec or conversion):
+            raise ValueError(message)
+    return template
+
+
 def validate_reply(template: str) -> str:
     """只允许简单命名占位符，拒绝属性访问、格式化指令和拼错的变量。"""
-    for _, field, format_spec, conversion in string.Formatter().parse(template):
-        if field is not None and (field not in REPLY_FIELDS or format_spec or conversion):
-            raise ValueError("回复模板仅支持 {角色名}，不支持格式化指令")
-    return template
+    return _validate_template_fields(template, REPLY_FIELDS, "回复模板仅支持 {角色名}，不支持格式化指令")
+
+
+def validate_guard_reply(template: str) -> str:
+    """权限提示只允许指令名和重置时间两个占位符。"""
+    return _validate_template_fields(template, GUARD_FIELDS, "权限提示仅支持 {指令}、{重置时间}，不支持格式化指令")
 
 
 def render_reply(template: str, role_name: str = "") -> str:
     return template.format_map({"角色名": role_name})
+
+
+def render_guard_reply(template: str, command_name: str, reset_time: str) -> str:
+    return template.format_map({"指令": command_name, "重置时间": reset_time})

@@ -70,5 +70,20 @@ class RolePatternTests(unittest.TestCase):
         self.assertNotIn("记住{角色名}", second.register_templates)
 
 
+    def test_old_config_is_extended_and_schema_exposes_hot_settings(self):
+        from maibot_sdk.config import generate_plugin_config_schema
+
+        config = settings.LittleFlowerDrawConfig(plugin={"enabled": True, "config_version": "0.1.0"})
+        self.assertTrue(config.plugin.enabled)
+        self.assertEqual(config.keywords.register_templates, ["小花小花这是 {角色名}"])
+        schema = generate_plugin_config_schema(settings.LittleFlowerDrawConfig)
+        self.assertTrue(schema)
+        self.assertIn("keywords", schema["sections"])
+        self.assertIn("replies", schema["sections"])
+        first, second = settings.KeywordConfig(), settings.KeywordConfig()
+        first.register_templates.append("记住{角色名}")
+        self.assertNotIn("记住{角色名}", second.register_templates)
+
+
 if __name__ == "__main__":
     unittest.main()

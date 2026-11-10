@@ -100,7 +100,8 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 paths=PluginPaths(data_dir=root / "data", runtime_dir=root / "temp"),
             )
         )
-        await self.plugin.on_load()
+        with patch.object(PLUGIN_MODULE, "load_legacy_settings", return_value=None):
+            await self.plugin.on_load()
         self.addAsyncCleanup(self.plugin.on_unload)
         self.message_number = 0
 
@@ -134,6 +135,21 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.rpc.images.clear()
         self.rpc.image_streams.clear()
         self.rpc.calls.clear()
+
+    def set_access(self, **values: Any) -> None:
+        data = self.plugin._settings_store.current().model_dump(mode="python")
+        data["access"].update(values)
+        self.plugin._settings_store.save(PLUGIN_MODULE.WebUISettings.model_validate(data))
+
+    def set_policy(self, command: str, **values: Any) -> None:
+        data = self.plugin._settings_store.current().model_dump(mode="python")
+        for policy in data["commands"]["policies"]:
+            if policy["command"] == command:
+                policy.update(values)
+        self.plugin._settings_store.save(PLUGIN_MODULE.WebUISettings.model_validate(data))
+
+    def guard_replies(self) -> Any:
+        return self.plugin._settings_store.current().guard_replies
 
     async def test_first_message_opens_real_target_chat_and_keeps_only_the_first_image(self) -> None:
         images = [png("red"), png("green"), png("blue")]
@@ -319,6 +335,29 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
             release.set()
             await asyncio.wait_for(self.plugin._queue.join(), timeout=3)
 
+    async def test_webui_settings_round_trip_applies_immediately(self) -> None:
+        settings = await self.plugin.webui_settings()
+        settings["access"]["whitelist_enabled"] = True
+        settings["access"]["group_whitelist"] = ["10001"]
+        settings["access"]["private_whitelist"] = ["20001"]
+        settings["commands"]["policies"][0]["permission"] = "仅管理员"
+
+        saved = await self.plugin.webui_settings_save(json.dumps(settings, ensure_ascii=False))
+        loaded = await self.plugin.webui_settings()
+
+        self.assertTrue(saved["saved"])
+        self.assertTrue(loaded["access"]["whitelist_enabled"])
+        self.assertEqual(loaded["commands"]["policies"][0]["permission"], "仅管理员")
+        self.assertTrue(self.plugin._settings_store.path.is_file())
+
+    async def test_webui_settings_reject_invalid_payload(self) -> None:
+        with self.assertRaisesRegex(ValueError, "JSON"):
+            await self.plugin.webui_settings_save("{")
+        settings = await self.plugin.webui_settings()
+        settings["access"]["admin_qq"] = "bad"
+        with self.assertRaises(ValueError):
+            await self.plugin.webui_settings_save(json.dumps(settings))
+
     async def test_webui_lists_and_serves_detail_and_thumbnail(self) -> None:
         image = png("red")
         await self.submit(self.message("小花小花这是 角色甲", [image]))
@@ -390,6 +429,56 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.plugin.ctx.webui, "claim_upload", AsyncMock(return_value={"path": str(outside)})):
             with self.assertRaisesRegex(RuntimeError, "上传目录"):
                 await self.plugin.webui_role_set_image("upload-outside", "越界")
+
+    async def test_whitelist_denies_group_before_queueing(self) -> None:
+        self.set_access(whitelist_enabled=True, group_whitelist=["99999"], private_whitelist=["20001"])
+
+        result = await self.submit(self.message("小花小花这是 白名单外", [png("red")], group="10001"))
+
+        self.assertEqual(result["action"], "abort")
+        self.assertEqual(self.rpc.texts, [self.guard_replies().whitelist_denied])
+        self.assertIsNone(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "白名单外"))
+
+    async def test_admin_bypasses_empty_whitelist(self) -> None:
+        self.set_access(whitelist_enabled=True, group_whitelist=[], private_whitelist=[])
+
+        await self.submit(self.message("小花小花这是 管理员角色", [png("red")], user="2685275264"))
+
+        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.registered.format(角色名="管理员角色")])
+        self.assertIsNotNone(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "管理员角色"))
+
+    async def test_admin_only_command_rejects_normal_users(self) -> None:
+        self.set_policy("登记角色", permission="仅管理员")
+
+        await self.submit(self.message("小花小花这是 普通角色", [png("red")], user="20001"))
+        self.assertEqual(self.rpc.texts, [self.guard_replies().admin_only])
+        self.assertIsNone(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "普通角色"))
+        self.clear_output()
+
+        await self.submit(self.message("小花小花这是 管理员角色", [png("red")], user="2685275264"))
+        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.registered.format(角色名="管理员角色")])
+
+    async def test_success_only_quota_counts_and_blocks_later_commands(self) -> None:
+        self.set_policy("登记角色", limit=1)
+
+        await self.submit(self.message("小花小花这是 第一次", [png("red")], user="20001"))
+        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.registered.format(角色名="第一次")])
+        self.clear_output()
+
+        await self.submit(self.message("小花小花这是 第二次", [png("blue")], user="20001"))
+        self.assertIn("次数用完", self.rpc.texts[-1])
+        self.assertIsNone(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "第二次"))
+
+    async def test_failed_registration_does_not_consume_quota(self) -> None:
+        self.set_policy("登记角色", limit=1)
+
+        await self.submit(self.message("小花小花这是 先失败", [], user="20001"))
+        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.missing_image.format(角色名="先失败")])
+        self.clear_output()
+
+        await self.submit(self.message("小花小花这是 再成功", [png("green")], user="20001"))
+        self.assertEqual(self.rpc.texts, [self.plugin.config.replies.registered.format(角色名="再成功")])
+        self.assertIsNotNone(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "再成功"))
 
     async def test_unload_waits_for_an_in_flight_database_transaction(self) -> None:
         started = threading.Event()
