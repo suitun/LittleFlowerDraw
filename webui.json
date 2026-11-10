@@ -3,10 +3,10 @@
   "required_capabilities": ["custom_pages", "image_upload"],
   "pages": [
     {
-      "id": "role-library",
-      "title": "角色库",
-      "description": "查看、搜索、改名、替换图片或删除小花记住的角色。",
-      "icon": "database",
+      "id": "home",
+      "title": "小花绘",
+      "description": "角色库、权限设置与后续绘图模块的统一入口。",
+      "icon": "puzzle",
       "mode": "custom",
       "entry": "webui/roles.html",
       "layout": "document",
@@ -34,9 +34,20 @@
           "parameters": {
             "name": {"type": "string", "required": true, "max_length": 256}
           }
+        },
+        "settings": {
+          "api": "webui_settings",
+          "version": "1"
         }
       },
       "actions": {
+        "save_settings": {
+          "api": "webui_settings_save",
+          "version": "1",
+          "parameters": {
+            "settings_json": {"type": "string", "required": true, "max_length": 65536}
+          }
+        },
         "delete": {
           "api": "webui_role_delete",
           "version": "1",

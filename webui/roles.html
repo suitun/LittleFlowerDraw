@@ -3,20 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>角色库</title>
+  <title>小花绘</title>
   <style>
     * { box-sizing: border-box; }
     body { padding: 20px; line-height: 1.6; }
     main { max-width: 1280px; margin: auto; }
     header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .app-header { align-items: center; margin-bottom: 12px; }
     h1 { font-size: 22px; margin: 0 0 4px; }
     h2 { font-size: 17px; margin: 0; }
     p { margin: 4px 0; }
     .muted { color: var(--maibot-muted); font-size: 13px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .actions .maibot-input { width: 200px; }
+    .module-nav { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px; margin-bottom: 16px; background: var(--maibot-soft); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); }
+    .module-nav button { border: 1px solid transparent; background: transparent; color: var(--maibot-muted); padding: 7px 13px; border-radius: calc(var(--maibot-radius) - 2px); cursor: pointer; font: inherit; }
+    .module-nav button:hover { color: var(--maibot-foreground); }
+    .module-nav button.active { color: var(--maibot-primary-foreground); background: var(--maibot-primary); }
+    .module { display: block; }
+    .module-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .module-head h2 { margin-bottom: 4px; }
+    .settings-card { margin: 0 0 16px; padding: 16px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
+    .settings-card legend { padding: 0 6px; font-weight: 600; }
+    .settings-field { display: grid; gap: 6px; margin: 10px 0; font-size: 14px; }
+    .settings-inline { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+    .settings-inline input[type="checkbox"] { width: 18px; height: 18px; }
+    .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .settings-field textarea { width: 100%; resize: vertical; min-height: 110px; font-family: inherit; }
+    .settings-field input[type="text"], .settings-field input[type="number"] { width: 100%; }
+    .policy-list { display: grid; gap: 12px; margin-top: 12px; }
+    .policy-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(130px, 0.8fr) minmax(150px, 1fr) minmax(150px, 1fr); gap: 12px; align-items: end; padding: 12px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-background); }
+    .policy-row label { display: grid; gap: 4px; font-size: 13px; color: var(--maibot-muted); }
+    .policy-row select, .policy-row input { width: 100%; }
+    .policy-command { align-self: center; font-weight: 600; overflow-wrap: anywhere; }
+    .settings-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    #settings-status { min-height: 22px; font-size: 14px; }
+    #settings-status.error, .error { color: var(--maibot-danger); }
+    .placeholder { padding: 48px 20px; text-align: center; color: var(--maibot-muted); border: 1px dashed var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
     #status { min-height: 22px; font-size: 14px; }
-    #status.error, .error { color: var(--maibot-danger); }
+    #status.error { color: var(--maibot-danger); }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
     .role-card { padding: 0; overflow: hidden; cursor: pointer; background: var(--maibot-surface); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); outline: none; }
     .role-card:focus-visible { box-shadow: 0 0 0 3px var(--maibot-primary); }
@@ -58,28 +83,120 @@
 </head>
 <body class="maibot-page">
 <main>
-  <header>
+  <header class="app-header">
     <div>
-      <h1>小花绘 · 角色库</h1>
-      <p id="stats" class="muted">正在加载…</p>
-    </div>
-    <div class="actions">
-      <input id="search" class="maibot-input" type="search" placeholder="搜索角色名" aria-label="搜索角色名" autocomplete="off">
-      <select id="sort" class="maibot-select" aria-label="排序方式">
-        <option value="name">按名称</option>
-        <option value="updated">按最近更新</option>
-      </select>
-      <button id="refresh" class="maibot-button" type="button">刷新</button>
-      <button id="upload-new" class="maibot-button maibot-button-primary" type="button">上传角色</button>
+      <h1>小花绘</h1>
+      <p class="muted">角色参考图库与绘图工作台</p>
     </div>
   </header>
-  <p id="status" role="status" aria-live="polite"></p>
-  <section id="grid" class="grid" aria-label="角色列表"></section>
-  <nav id="pager" class="pager" hidden>
-    <button id="prev" class="maibot-button" type="button">上一页</button>
-    <span id="page-label" class="muted"></span>
-    <button id="next" class="maibot-button" type="button">下一页</button>
+
+  <nav class="module-nav" aria-label="小花绘模块">
+    <button type="button" data-module="roles" class="active">角色库</button>
+    <button type="button" data-module="settings">权限与设置</button>
+    <button type="button" data-module="draw">绘图任务</button>
+    <button type="button" data-module="history">历史任务</button>
+    <button type="button" data-module="api">绘图 API</button>
+    <button type="button" data-module="prompts">提示词模板</button>
   </nav>
+
+  <section id="module-roles" class="module">
+    <div class="module-head">
+      <div>
+        <h2>角色库</h2>
+        <p class="muted">浏览、搜索、上传替换、改名或删除小花记住的角色。</p>
+      </div>
+      <div class="actions">
+        <input id="search" class="maibot-input" type="search" placeholder="搜索角色名" aria-label="搜索角色名" autocomplete="off">
+        <select id="sort" class="maibot-select" aria-label="排序方式">
+          <option value="name">按名称</option>
+          <option value="updated">按最近更新</option>
+        </select>
+        <button id="refresh" class="maibot-button" type="button">刷新</button>
+        <button id="upload-new" class="maibot-button maibot-button-primary" type="button">上传角色</button>
+      </div>
+    </div>
+    <p id="stats" class="muted">正在加载…</p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <section id="grid" class="grid" aria-label="角色列表"></section>
+    <nav id="pager" class="pager" hidden>
+      <button id="prev" class="maibot-button" type="button">上一页</button>
+      <span id="page-label" class="muted"></span>
+      <button id="next" class="maibot-button" type="button">下一页</button>
+    </nav>
+  </section>
+
+  <section id="module-settings" class="module" hidden>
+    <div class="module-head">
+      <div>
+        <h2>权限与设置</h2>
+        <p class="muted">这些设置保存在插件数据目录，保存后新消息立即使用新规则。</p>
+      </div>
+    </div>
+    <form id="settings-form">
+      <fieldset class="settings-card">
+        <legend>管理员与白名单</legend>
+        <label class="settings-field">管理员 QQ
+          <input id="setting-admin" class="maibot-input" type="text" inputmode="numeric" maxlength="12" autocomplete="off">
+        </label>
+        <label class="settings-inline">
+          <input id="setting-whitelist" type="checkbox"> 启用群聊 / 私聊白名单
+        </label>
+        <p class="muted">关闭时所有聊天可用；开启后只允许下面的群号或 QQ 号，管理员始终可用。</p>
+        <div class="settings-grid">
+          <label class="settings-field">群聊白名单
+            <textarea id="setting-groups" class="maibot-input" rows="4" placeholder="每行一个群号"></textarea>
+          </label>
+          <label class="settings-field">私聊白名单
+            <textarea id="setting-private" class="maibot-input" rows="4" placeholder="每行一个 QQ 号"></textarea>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-card">
+        <legend>指令权限</legend>
+        <p class="muted">每人每指令跨群统计；0 表示不限次数，重置间隔按天，在到期日 0 点重置。</p>
+        <div id="policy-list" class="policy-list"></div>
+      </fieldset>
+
+      <fieldset class="settings-card">
+        <legend>提示文案</legend>
+        <label class="settings-field">白名单拒绝
+          <input id="setting-whitelist-reply" class="maibot-input" type="text" maxlength="2000">
+        </label>
+        <label class="settings-field">仅管理员
+          <input id="setting-admin-reply" class="maibot-input" type="text" maxlength="2000">
+        </label>
+        <label class="settings-field">次数用完（支持 {指令}、{重置时间}）
+          <input id="setting-quota-reply" class="maibot-input" type="text" maxlength="2000">
+        </label>
+      </fieldset>
+
+      <div class="settings-footer">
+        <p id="settings-status" role="status" aria-live="polite"></p>
+        <button id="settings-save" class="maibot-button maibot-button-primary" type="button">保存设置</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="module-draw" class="module" hidden>
+    <div class="module-head"><div><h2>绘图任务</h2><p class="muted">提交绘图任务、查看排队状态。</p></div></div>
+    <div class="placeholder">绘图任务模块正在开发中，后续会接入绘图 API 与任务队列。</div>
+  </section>
+
+  <section id="module-history" class="module" hidden>
+    <div class="module-head"><div><h2>历史任务</h2><p class="muted">查看已完成、失败或取消的绘图任务。</p></div></div>
+    <div class="placeholder">历史任务模块正在开发中。</div>
+  </section>
+
+  <section id="module-api" class="module" hidden>
+    <div class="module-head"><div><h2>绘图 API</h2><p class="muted">配置绘图服务地址、密钥和模型参数。</p></div></div>
+    <div class="placeholder">绘图 API 配置模块正在开发中。</div>
+  </section>
+
+  <section id="module-prompts" class="module" hidden>
+    <div class="module-head"><div><h2>提示词模板</h2><p class="muted">管理绘图提示词模板和变量。</p></div></div>
+    <div class="placeholder">提示词模板模块正在开发中。</div>
+  </section>
 </main>
 
 <div id="modal" class="modal" hidden>
@@ -121,6 +238,11 @@
   const modalTitle = document.querySelector("#modal-title");
   const modalBody = document.querySelector("#modal-body");
   const replaceFile = document.querySelector("#replace-file");
+  const settingsStatus = document.querySelector("#settings-status");
+  const policyList = document.querySelector("#policy-list");
+  const moduleButtons = [...document.querySelectorAll(".module-nav button")];
+  const modules = [...document.querySelectorAll(".module")];
+  let settingsLoaded = false;
 
   function make(tag, className, text) {
     const node = document.createElement(tag);
@@ -591,9 +713,134 @@
   });
   document.querySelector("#upload-new").addEventListener("click", openUploadForm);
 
+  function setSettingsStatus(message, isError = false) {
+    settingsStatus.textContent = message || "";
+    settingsStatus.className = isError ? "error" : "";
+  }
+
+  function parseIdList(text) {
+    return text.split(/\r?\n|,|，/).map(value => value.trim()).filter(Boolean);
+  }
+
+  function renderPolicies(policies) {
+    policyList.replaceChildren();
+    for (const policy of policies) {
+      const row = make("div", "policy-row");
+      row.dataset.command = policy.command;
+      row.append(make("div", "policy-command", policy.command));
+
+      const permissionLabel = make("label");
+      permissionLabel.append(document.createTextNode("权限"));
+      const permission = make("select", "maibot-select policy-permission");
+      for (const value of ["所有人", "仅管理员"]) {
+        const option = make("option", "", value);
+        option.value = value;
+        permission.append(option);
+      }
+      permission.value = policy.permission;
+      permissionLabel.append(permission);
+
+      const limitLabel = make("label");
+      limitLabel.append(document.createTextNode("次数上限（0=不限）"));
+      const limit = make("input", "maibot-input policy-limit");
+      limit.type = "number";
+      limit.min = "0";
+      limit.step = "1";
+      limit.value = String(policy.limit);
+      limitLabel.append(limit);
+
+      const resetLabel = make("label");
+      resetLabel.append(document.createTextNode("重置间隔（天）"));
+      const reset = make("input", "maibot-input policy-reset");
+      reset.type = "number";
+      reset.min = "1";
+      reset.step = "1";
+      reset.value = String(policy.reset_days);
+      resetLabel.append(reset);
+
+      row.append(permissionLabel, limitLabel, resetLabel);
+      policyList.append(row);
+    }
+  }
+
+  function fillSettings(settings) {
+    document.querySelector("#setting-admin").value = settings.access.admin_qq;
+    document.querySelector("#setting-whitelist").checked = settings.access.whitelist_enabled;
+    document.querySelector("#setting-groups").value = settings.access.group_whitelist.join("\n");
+    document.querySelector("#setting-private").value = settings.access.private_whitelist.join("\n");
+    document.querySelector("#setting-whitelist-reply").value = settings.guard_replies.whitelist_denied;
+    document.querySelector("#setting-admin-reply").value = settings.guard_replies.admin_only;
+    document.querySelector("#setting-quota-reply").value = settings.guard_replies.quota_exceeded;
+    renderPolicies(settings.commands.policies);
+  }
+
+  function collectPolicies() {
+    return [...policyList.querySelectorAll(".policy-row")].map(row => ({
+      command: row.dataset.command,
+      permission: row.querySelector(".policy-permission").value,
+      limit: Number(row.querySelector(".policy-limit").value),
+      reset_days: Number(row.querySelector(".policy-reset").value)
+    }));
+  }
+
+  async function loadSettings() {
+    if (settingsLoaded) return;
+    setSettingsStatus("正在加载设置…");
+    try {
+      const settings = await request("query", "settings");
+      fillSettings(settings);
+      settingsLoaded = true;
+      setSettingsStatus("");
+    } catch (error) {
+      setSettingsStatus(error.message || String(error), true);
+    }
+  }
+
+  async function saveSettings() {
+    const button = document.querySelector("#settings-save");
+    const payload = {
+      access: {
+        admin_qq: document.querySelector("#setting-admin").value.trim(),
+        whitelist_enabled: document.querySelector("#setting-whitelist").checked,
+        group_whitelist: parseIdList(document.querySelector("#setting-groups").value),
+        private_whitelist: parseIdList(document.querySelector("#setting-private").value)
+      },
+      commands: {policies: collectPolicies()},
+      guard_replies: {
+        whitelist_denied: document.querySelector("#setting-whitelist-reply").value,
+        admin_only: document.querySelector("#setting-admin-reply").value,
+        quota_exceeded: document.querySelector("#setting-quota-reply").value
+      }
+    };
+    button.disabled = true;
+    setSettingsStatus("正在保存…");
+    try {
+      await request("action", "save_settings", {settings_json: JSON.stringify(payload)});
+      settingsLoaded = false;
+      await loadSettings();
+      setSettingsStatus("设置已保存，新消息立即生效");
+    } catch (error) {
+      setSettingsStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function activateModule(name) {
+    for (const button of moduleButtons) button.classList.toggle("active", button.dataset.module === name);
+    for (const section of modules) section.hidden = section.id !== `module-${name}`;
+    if (name === "settings") void loadSettings();
+  }
+
+  for (const button of moduleButtons) {
+    button.addEventListener("click", () => activateModule(button.dataset.module));
+  }
+  document.querySelector("#settings-save").addEventListener("click", saveSettings);
+
   async function start() {
     try {
       await maibot.ready;
+      activateModule("roles");
       await load(1);
     } catch (error) {
       setStatus(error.message || String(error), true);
