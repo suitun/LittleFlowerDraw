@@ -3,7 +3,7 @@
 from importlib import import_module
 from io import BytesIO
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempdir import TemporaryDirectory
 from types import ModuleType
 
 import base64

@@ -315,6 +315,19 @@ def _resolve_size(config: DrawingApiConfig, reference: bytes) -> str:
     return min(choices, key=lambda value: abs(math.log(ratio / choices[value])))
 
 
+def _bad_request_message(detail: str) -> str:
+    """把上游 400 的文本归类成用户能看懂的原因。"""
+    lowered = detail.lower()
+    content_tokens = ("内容政策", "内容审核", "审核", "违反", "敏感", "content policy", "safety", "moderation")
+    if any(token in lowered for token in content_tokens):
+        return "接口返回 400：图片或提示词内容未通过接口审核"
+    if any(token in lowered for token in ("too large", "size", "maximum", "4mb", "文件过大")):
+        return "接口返回 400：图片文件太大或尺寸不符合接口要求"
+    if any(token in lowered for token in ("格式", "format", "图片有误", "invalid image", "unsupported", "supported")):
+        return "接口返回 400：图片格式或输入不符合接口要求"
+    return "接口返回 400，但没有提供明确原因"
+
+
 class OpenAIImageClient:
     """调用 OpenAI 兼容的 /v1/images/edits，多张图片按顺序上传。"""
 
@@ -353,10 +366,7 @@ class OpenAIImageClient:
             detail = error.read(1200).decode("utf-8", "replace")
             if error.code == 400:
                 error.close()
-                lowered = detail.lower()
-                if any(token in lowered for token in ("too large", "size", "maximum", "4mb")):
-                    raise DrawingApiError("图片文件太大或格式不符合接口要求", status_code=400) from error
-                raise DrawingApiError("图片不符合接口要求", status_code=400) from error
+                raise DrawingApiError(_bad_request_message(detail), status_code=400) from error
             raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}", status_code=error.code) from error
         except (URLError, TimeoutError, OSError) as error:
             raise DrawingApiError(f"绘图 API 请求失败: {error}") from error
@@ -407,7 +417,7 @@ class OpenAIImageClient:
             detail = error.read(1200).decode("utf-8", "replace")
             if error.code == 400:
                 error.close()
-                raise DrawingApiError("自由绘画提示词不符合接口要求") from error
+                raise DrawingApiError(_bad_request_message(detail)) from error
             raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}", status_code=error.code) from error
         except (URLError, TimeoutError, OSError) as error:
             raise DrawingApiError(f"绘图 API 请求失败: {error}") from error

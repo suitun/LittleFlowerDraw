@@ -3,7 +3,7 @@ import json
 import unittest
 from io import BytesIO
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempdir import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
@@ -14,6 +14,7 @@ from drawing_api import (
     DrawingApiError,
     DrawingApiStore,
     OpenAIImageClient,
+    _bad_request_message,
     fetch_models,
     models_endpoint,
 )
@@ -135,6 +136,9 @@ class DrawingApiTests(unittest.TestCase):
         self.assertEqual(result.image, png())
 
     def test_http_400_becomes_short_image_rejected_error(self) -> None:
+        self.assertIn("内容", _bad_request_message("该图片违反内容政策"))
+        self.assertIn("格式", _bad_request_message("unsupported image format"))
+        self.assertIn("400", _bad_request_message("something unexpected"))
         error = HTTPError(
             "https://relay.test/v1/images/edits",
             400,

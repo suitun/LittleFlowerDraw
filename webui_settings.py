@@ -156,6 +156,11 @@ class CommandPolicy(PluginConfigBase):
     limit: int = Field(default=0, ge=0, le=1_000_000, description="每人每指令的次数上限；0 表示不限次数。")
     reset_days: int = Field(default=1, ge=1, le=365, description="次数重置间隔（天），在到期日的 0 点重置。")
 
+    @field_validator("command", mode="before")
+    @classmethod
+    def migrate_legacy_ranking(cls, value: object) -> object:
+        return "排行榜" if value == "小猪排行榜" else value
+
 
 def default_command_policies() -> List[CommandPolicy]:
     return [CommandPolicy(command=spec.command_id) for spec in COMMAND_SPECS]
@@ -218,6 +223,11 @@ class DrawingConfig(PluginConfigBase):
         default=_DRAWING_PROMPTS["group_prompt"],
         max_length=8000,
         description="多人替换的基础提示词。",
+    )
+    extra_prompt_prefix: str = Field(
+        default="注意用户额外需求：",
+        max_length=80,
+        description="有额外提示词时加在基础提示词和额外需求之间的引导语。",
     )
     min_group_roles: int = Field(default=3, ge=3, le=8, description="多人替换最少角色数。")
     max_group_roles: int = Field(default=8, ge=3, le=8, description="多人替换最多角色数。")
@@ -434,8 +444,34 @@ class DrawingConfig(PluginConfigBase):
         return self
 
 
+class UserQuota(PluginConfigBase):
+    """给指定 QQ 的某项指令增加额外次数。"""
+
+    user_id: str = Field(..., min_length=5, max_length=20, pattern=r"^\d{5,20}$", description="QQ 号")
+    command: str = Field(..., min_length=1, max_length=64, description="指令名称")
+    extra_count: int = Field(default=1, ge=1, le=100000, description="在原有次数上额外增加的次数")
+
+    @field_validator("command")
+    @classmethod
+    def validate_command(cls, value: str) -> str:
+        if value not in COMMAND_IDS:
+            raise ValueError(f"未知指令: {value}")
+        return value
+
+    @field_validator("command", mode="before")
+    @classmethod
+    def migrate_legacy_ranking(cls, value: object) -> object:
+        return "排行榜" if value == "小猪排行榜" else value
+
+
 class TaskQueueConfig(PluginConfigBase):
     max_concurrent_tasks: int = Field(default=1, ge=1, le=8, description="同时执行的绘图任务数")
+    task_interval_seconds: int = Field(
+        default=5,
+        ge=0,
+        le=300,
+        description="上一张画完后等待多少秒再开始下一张，避免中转站连续请求。",
+    )
     max_waiting_tasks: int = Field(default=20, ge=0, le=1000, description="最多排队任务数，0 表示不限")
     task_timeout_seconds: int = Field(default=600, ge=30, le=3600, description="单个任务执行超时秒数")
     poll_interval_seconds: int = Field(default=2, ge=1, le=60, description="队列轮询间隔秒数")
@@ -455,6 +491,17 @@ class WebUISettings(PluginConfigBase):
     access: AccessConfig = Field(default_factory=AccessConfig)
     commands: CommandPolicyConfig = Field(default_factory=CommandPolicyConfig)
     guard_replies: GuardReplyConfig = Field(default_factory=GuardReplyConfig)
+    user_quotas: List[UserQuota] = Field(default_factory=list, description="指定 QQ 的指令额外次数")
+
+    @model_validator(mode="after")
+    def validate_unique_user_quotas(self) -> "WebUISettings":
+        seen: set[tuple[str, str]] = set()
+        for quota in self.user_quotas:
+            key = (quota.user_id, quota.command)
+            if key in seen:
+                raise ValueError(f"用户 {quota.user_id} 的「{quota.command}」额外次数重复")
+            seen.add(key)
+        return self
 
 
 def load_legacy_settings(config_path: Path) -> Optional[Dict[str, Any]]:

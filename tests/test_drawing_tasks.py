@@ -1,7 +1,7 @@
 """验证绘图任务的 ID 分配、排队容量、状态流转、文件清理与历史筛选。"""
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempdir import TemporaryDirectory
 from typing import List, Optional
 from unittest.mock import patch
 
@@ -89,6 +89,13 @@ class DrawingTaskStoreTests(unittest.TestCase):
         )
         self.assertEqual(record.reference_path, "")
         self.assertEqual(self.store.get(record.id).reference_path, "")
+
+    def test_role_draw_counts_include_successful_history_only(self) -> None:
+        self._create_and_finish("user-a", "message-1", ["甲", "乙"], "单角色替换", "succeed")
+        self._create_and_finish("user-b", "message-2", ["甲"], "双角色替换", "succeed")
+        self._create_and_finish("user-c", "message-3", ["甲"], "单角色替换", "fail")
+
+        self.assertEqual(self.store.role_draw_counts(), [("甲", 2), ("乙", 1)])
 
     def test_requester_names_persist_across_reopen(self) -> None:
         record = self.store.create_task(

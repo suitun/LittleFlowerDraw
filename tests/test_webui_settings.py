@@ -2,7 +2,7 @@
 
 from importlib import import_module
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempdir import TemporaryDirectory
 from types import ModuleType
 
 import json
@@ -30,7 +30,7 @@ class WebUISettingsTests(unittest.TestCase):
 
         self.assertEqual(
             [policy.command for policy in settings.commands.policies],
-            ["登记角色", "查看角色", "角色列表", "帮助", "自由绘画", "单角色替换", "双角色替换", "多人替换"],
+            ["登记角色", "查看角色", "角色列表", "排行榜", "帮助", "自由绘画", "单角色替换", "双角色替换", "多人替换"],
         )
         self.assertEqual(settings.access.admin_qq, "2685275264")
         self.assertFalse(settings.access.whitelist_enabled)
@@ -41,7 +41,7 @@ class WebUISettingsTests(unittest.TestCase):
         config = webui_settings.CommandPolicyConfig(
             policies=[{"command": "登记角色", "permission": "仅管理员", "limit": 2, "reset_days": 2}]
         )
-        self.assertEqual(len(config.policies), 8)
+        self.assertEqual(len(config.policies), 9)
         register = next(policy for policy in config.policies if policy.command == "登记角色")
         self.assertEqual((register.permission, register.limit, register.reset_days), ("仅管理员", 2, 2))
 
@@ -52,6 +52,29 @@ class WebUISettingsTests(unittest.TestCase):
                     {"command": "登记角色", "permission": "仅管理员", "limit": 0, "reset_days": 1},
                 ]
             )
+
+    def test_user_quota_validates_qq_command_and_duplicates(self) -> None:
+        settings = webui_settings.WebUISettings(
+            user_quotas=[{"user_id": "20001", "command": "登记角色", "extra_count": 3}]
+        )
+        self.assertEqual(settings.user_quotas[0].extra_count, 3)
+        for values in (
+            [{"user_id": "abc", "command": "登记角色", "extra_count": 1}],
+            [{"user_id": "20001", "command": "不存在", "extra_count": 1}],
+            [
+                {"user_id": "20001", "command": "登记角色", "extra_count": 1},
+                {"user_id": "20001", "command": "登记角色", "extra_count": 2},
+            ],
+        ):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                webui_settings.WebUISettings(user_quotas=values)
+
+    def test_legacy_ranking_command_name_is_migrated(self) -> None:
+        settings = webui_settings.WebUISettings(
+            commands={"policies": [{"command": "小猪排行榜", "permission": "所有人", "limit": 2, "reset_days": 1}]}
+        )
+        ranking = next(policy for policy in settings.commands.policies if policy.command == "排行榜")
+        self.assertEqual(ranking.limit, 2)
 
     def test_access_normalizes_and_validates_admin_and_whitelists(self) -> None:
         config = webui_settings.AccessConfig(

@@ -137,3 +137,78 @@ def render_help_image(
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
+
+
+def _fit_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, width: int) -> str:
+    if draw.textlength(text, font=font) <= width:
+        return text
+    value = text
+    while value and draw.textlength(value + "…", font=font) > width:
+        value = value[:-1]
+    return value + "…"
+
+
+def render_ranking_image(
+    title: str,
+    rows: Sequence[Tuple[str, int]],
+    footer: str,
+    note: str,
+) -> bytes:
+    """渲染角色绘图次数排行榜；所有角色按成功次数降序排列。"""
+    title_font = _font(46, bold=True)
+    rank_font = _font(25, bold=True)
+    name_font = _font(25, bold=True)
+    count_font = _font(25, bold=True)
+    note_font = _font(20)
+    padding = _PADDING
+    content_width = _WIDTH - _MARGIN * 2 - padding * 2
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    row_height = 56
+    footer_lines = _wrap(measure, footer, note_font, content_width)
+    note_lines = _wrap(measure, note, note_font, content_width)
+    height = padding + 76 + 24 + max(1, len(rows)) * row_height + 20
+    height += len(footer_lines) * 27 + 10 + len(note_lines) * 25 + padding
+    height = max(420, height)
+
+    image = Image.new("RGB", (_WIDTH, height), "#f7eef3")
+    draw = ImageDraw.Draw(image)
+    _rounded(draw, (_MARGIN, _MARGIN, _WIDTH - _MARGIN, height - _MARGIN), _RADIUS, "#fffafd")
+    draw.rounded_rectangle((_MARGIN, _MARGIN, _WIDTH - _MARGIN, _MARGIN + 112), radius=_RADIUS, fill="#f3dfea")
+    draw.rectangle((_MARGIN, _MARGIN + 72, _WIDTH - _MARGIN, _MARGIN + 112), fill="#f3dfea")
+
+    x = _MARGIN + padding
+    y = _MARGIN + 34
+    draw.text((x, y), title, font=title_font, fill="#4f3542")
+    y += 74
+
+    if not rows:
+        draw.text((x + 20, y + 10), "还没有角色参与过绘图喵～", font=name_font, fill="#8a6b79")
+        y += row_height
+    else:
+        for index, (name, count) in enumerate(rows, start=1):
+            badge_color = {1: "#d28aab", 2: "#b792b8", 3: "#aaa2c2"}.get(index, "#ead7e1")
+            draw.rounded_rectangle((x, y + 8, x + 42, y + 46), radius=12, fill=badge_color)
+            rank = str(index)
+            rank_width = draw.textlength(rank, font=rank_font)
+            draw.text((x + 21 - rank_width / 2, y + 14), rank, font=rank_font, fill="#fffafd")
+            name_text = _fit_text(draw, name, name_font, content_width - 190)
+            draw.text((x + 58, y + 15), name_text, font=name_font, fill="#4f3542")
+            count_text = f"{count} 次"
+            count_width = draw.textlength(count_text, font=count_font)
+            draw.text((x + content_width - count_width, y + 15), count_text, font=count_font, fill="#b15d83")
+            bar_width = max(8, int((content_width - 190) * count / max(1, rows[0][1])))
+            draw.rounded_rectangle((x + 58, y + 47, x + 58 + bar_width, y + 51), radius=2, fill="#f0c7d8")
+            y += row_height
+
+    y += 12
+    for line in footer_lines:
+        draw.text((x, y), line, font=note_font, fill="#8a6b79")
+        y += 27
+    y += 8
+    for line in note_lines:
+        draw.text((x, y), line, font=note_font, fill="#a07b8b")
+        y += 25
+
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()

@@ -78,6 +78,12 @@ class RolePatternTests(unittest.TestCase):
         marked = patterns.match_request("小花记得谁", ["小花小花这是 {角色名}"], [], ["@小花记得谁"], mentioned_bot=True)
         self.assertEqual(marked.action, "list")
 
+    def test_ranking_command_matches_configured_keyword(self):
+        request = patterns.match_request(
+            "小猪排行榜", ["小花小花这是 {角色名}"], [], ["小花记得谁"], ["小花绘帮助"], ["小猪排行榜"]
+        )
+        self.assertEqual((request.action, request.role_name), ("ranking", ""))
+
     def test_help_command_matches_configured_keyword(self):
         request = patterns.match_request(
             "小花绘帮助", ["小花小花这是 {角色名}"], [], ["小花记得谁"], ["小花绘帮助"]

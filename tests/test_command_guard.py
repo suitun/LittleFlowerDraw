@@ -3,7 +3,7 @@
 from datetime import datetime
 from importlib import import_module
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempdir import TemporaryDirectory
 from types import ModuleType
 from unittest.mock import patch
 
@@ -103,6 +103,19 @@ class CommandGuardTests(unittest.TestCase):
         next_day = local_timestamp(11, 0, 1)
         with patch("command_usage.time.time", return_value=next_day):
             self.assertIsNone(self.guard.check_quota("登记角色", "20001"))
+
+    def test_user_extra_quota_is_added_to_command_limit(self) -> None:
+        settings = self.settings()
+        settings.user_quotas = [
+            webui_settings.UserQuota(user_id="20001", command="登记角色", extra_count=2)
+        ]
+        self.settings_store.save(settings)
+
+        for _ in range(3):
+            self.assertIsNone(self.guard.check_quota("登记角色", "20001"))
+            self.guard.record_success("登记角色", "20001")
+        self.assertIsNotNone(self.guard.check_quota("登记角色", "20001"))
+        self.assertIsNone(self.guard.check_quota("登记角色", "20002"))
 
     def test_admin_never_consumes_quota(self) -> None:
         self.settings()

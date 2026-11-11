@@ -16,6 +16,9 @@
     .muted { color: var(--maibot-muted); font-size: 13px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .actions .maibot-input { width: 200px; }
+    .maibot-select { color: var(--maibot-foreground); background-color: var(--maibot-surface); }
+    .maibot-select option, .maibot-select optgroup { color: #1f2328; background-color: #ffffff; }
+    .maibot-select option:checked { color: #ffffff; background-color: #2563eb; }
     .module-nav { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px; margin-bottom: 16px; background: var(--maibot-soft); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); }
     .module-nav button { border: 1px solid transparent; background: transparent; color: var(--maibot-muted); padding: 7px 13px; border-radius: calc(var(--maibot-radius) - 2px); cursor: pointer; font: inherit; }
     .module-nav button:hover { color: var(--maibot-foreground); }
@@ -24,6 +27,12 @@
     .module-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
     .module-head h2 { margin-bottom: 4px; }
     .settings-card { margin: 0 0 16px; padding: 16px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
+    .user-quota-list { display: grid; gap: 10px; }
+    .user-quota-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); flex-wrap: wrap; }
+    .user-quota-main { display: grid; gap: 4px; min-width: 220px; }
+    .user-quota-qq { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .user-quota-detail { color: var(--maibot-muted); font-size: 12.5px; }
+    .user-quota-row .actions { margin-left: auto; }
     .settings-card legend { padding: 0 6px; font-weight: 600; }
     .settings-field { display: grid; gap: 6px; margin: 10px 0; font-size: 14px; }
     .settings-inline { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
@@ -36,11 +45,16 @@
     .field-with-button .maibot-input { flex: 1; min-width: 0; }
     .field-with-button .maibot-button { white-space: nowrap; }
     .model-combobox { position: relative; flex: 1; min-width: 0; }
+    .select-combobox { flex: 0 1 180px; }
+    .actions .select-combobox { width: 150px; flex: 0 0 auto; }
+    .settings-field .select-combobox, .policy-row .select-combobox { width: 100%; flex: 1; }
+    .select-display { cursor: pointer; background: var(--maibot-surface, #ffffff); color: var(--maibot-foreground, #1f2328); }
+    .model-option.selected { background: var(--maibot-soft); }
     .model-combobox .maibot-input { width: 100%; padding-right: 34px; }
     .model-toggle { position: absolute; top: 1px; right: 1px; bottom: 1px; width: 32px; border: 0; border-left: 1px solid var(--maibot-border); background: transparent; color: var(--maibot-muted); cursor: pointer; border-radius: 0 calc(var(--maibot-radius) - 2px) calc(var(--maibot-radius) - 2px) 0; }
     .model-toggle:hover { color: var(--maibot-foreground); background: var(--maibot-soft); }
-    .model-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; max-height: 240px; overflow-y: auto; padding: 4px; background: var(--maibot-surface); border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
-    .model-option { display: block; width: 100%; padding: 7px 9px; border: 0; border-radius: calc(var(--maibot-radius) - 3px); background: transparent; color: var(--maibot-foreground); text-align: left; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+    .model-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; max-height: 240px; overflow-y: auto; padding: 4px; background: var(--maibot-surface, #ffffff); border: 1px solid var(--maibot-border, #ccd0d5); border-radius: var(--maibot-radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+    .model-option { display: block; width: 100%; padding: 7px 9px; border: 0; border-radius: calc(var(--maibot-radius) - 3px); background: transparent; color: var(--maibot-foreground, #1f2328); text-align: left; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
     .model-option:hover, .model-option:focus-visible { background: var(--maibot-soft); }
     .model-empty { padding: 8px 9px; color: var(--maibot-muted); font-size: 13px; }
     .policy-list { display: grid; gap: 12px; margin-top: 12px; }
@@ -185,6 +199,7 @@
     <button type="button" data-module="roles" class="active">角色库</button>
     <button type="button" data-module="settings">插件设置</button>
     <button type="button" data-module="replies">回复配置</button>
+    <button type="button" data-module="users">用户管理</button>
     <button type="button" data-module="draw">当前任务</button>
     <button type="button" data-module="history">任务历史</button>
     <button type="button" data-module="api">绘图 API</button>
@@ -240,6 +255,9 @@
           <label class="settings-field">帮助模板（每行一条）
             <textarea id="setting-help-templates" class="maibot-input" rows="3" placeholder="小花绘帮助"></textarea>
           </label>
+          <label class="settings-field">排行榜模板（每行一条）
+            <textarea id="setting-ranking-templates" class="maibot-input" rows="3" placeholder="小猪排行榜"></textarea>
+          </label>
         </div>
         <p class="muted">登记/查看模板必须且只能包含一个 {角色名}，角色列表模板不能带占位符。模板开头加 <code>@</code> 表示必须先 @ 机器人，例如 <code>@小花小花这是 {角色名}</code> 或 <code>@小花记得谁</code>。</p>
       </fieldset>
@@ -282,6 +300,9 @@
           <label class="settings-field">自由绘画兜底提示词
             <textarea id="setting-drawing-fallback-prompt" class="maibot-input" rows="3" placeholder="发挥创意"></textarea>
           </label>
+          <label class="settings-field">额外提示词引导语
+            <input id="setting-drawing-extra-prefix" class="maibot-input" placeholder="注意用户额外需求：">
+          </label>
         </div>
         <p class="muted">提示词必须明确图1是底图、后续图片只是角色外观参考。参考图是头像或表情包时，建议「绘图 API → 尺寸」选 <code>reference</code>，避免输出被角色立绘的比例带偏。</p>
         <div class="settings-grid">
@@ -294,6 +315,7 @@
         <legend>任务队列</legend>
         <div class="settings-grid">
           <label class="settings-field">同时执行任务数<input id="setting-queue-concurrent" class="maibot-input" type="number" min="1" max="8"></label>
+          <label class="settings-field">任务间隔秒数<input id="setting-queue-interval" class="maibot-input" type="number" min="0" max="300"></label>
           <label class="settings-field">最多排队任务数（0=不限）<input id="setting-queue-waiting" class="maibot-input" type="number" min="0" max="1000"></label>
           <label class="settings-field">任务超时秒数<input id="setting-queue-timeout" class="maibot-input" type="number" min="30" max="3600"></label>
           <label class="settings-field">队列轮询秒数<input id="setting-queue-poll" class="maibot-input" type="number" min="1" max="60"></label>
@@ -335,6 +357,36 @@
         <button id="settings-save" class="maibot-button maibot-button-primary" type="button">保存设置</button>
       </div>
     </form>
+  </section>
+
+  <section id="module-users" class="module" hidden>
+    <div class="module-head">
+      <div>
+        <h2>用户管理</h2>
+        <p class="muted">给指定 QQ 增加某项指令的额外次数；额外次数叠加在指令基础次数上，用完基础额度后继续使用。</p>
+      </div>
+    </div>
+    <div class="settings-card">
+      <div class="settings-grid">
+        <label class="settings-field">QQ 号
+          <input id="user-quota-qq" class="maibot-input" inputmode="numeric" placeholder="例如 2685275264">
+        </label>
+        <label class="settings-field">指令
+          <select id="user-quota-command" class="maibot-select"></select>
+        </label>
+        <label class="settings-field">额外次数
+          <input id="user-quota-extra" class="maibot-input" type="number" min="1" max="100000" value="1">
+        </label>
+      </div>
+      <div class="settings-footer">
+        <p id="user-quota-status" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button id="user-quota-reset" class="maibot-button" type="button">清空</button>
+          <button id="user-quota-save" class="maibot-button maibot-button-primary" type="button">添加额度</button>
+        </div>
+      </div>
+    </div>
+    <div id="user-quota-list" class="user-quota-list"></div>
   </section>
 
   <section id="module-replies" class="module" hidden>
@@ -502,6 +554,7 @@
   const modules = [...document.querySelectorAll(".module")];
   let settingsLoaded = false;
   let settingsData = null;
+  let userQuotaEditIndex = -1;
   let apiLoaded = false;
   let apiModels = [];
   let currentTasksLoading = false;
@@ -1065,6 +1118,86 @@
     return text.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   }
 
+  function refreshSelectCombo(select) {
+    const combo = select._combo;
+    if (!combo) return;
+    const current = select.selectedOptions[0];
+    combo.input.value = current ? current.textContent : "";
+    combo.menu.replaceChildren();
+    for (const option of select.options) {
+      const item = make("button", "model-option", option.textContent);
+      item.type = "button";
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", option.selected ? "true" : "false");
+      if (option.selected) item.classList.add("selected");
+      item.addEventListener("click", () => {
+        select.value = option.value;
+        select.dispatchEvent(new Event("change", {bubbles: true}));
+        refreshSelectCombo(select);
+        combo.menu.hidden = true;
+        combo.input.setAttribute("aria-expanded", "false");
+      });
+      combo.menu.append(item);
+    }
+  }
+
+  function enhanceSelect(select) {
+    if (select._combo) {
+      refreshSelectCombo(select);
+      return;
+    }
+    select.hidden = true;
+    const box = make("div", "model-combobox select-combobox");
+    const input = make("input", "maibot-input select-display");
+    input.type = "text";
+    input.readOnly = true;
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-expanded", "false");
+    const toggle = make("button", "model-toggle", "▾");
+    toggle.type = "button";
+    toggle.setAttribute("aria-label", "展开选项");
+    const menu = make("div", "model-menu select-menu");
+    menu.hidden = true;
+    menu.setAttribute("role", "listbox");
+    input.setAttribute("aria-controls", `select-menu-${select.id}`);
+    menu.id = `select-menu-${select.id}`;
+    box.append(input, toggle, menu);
+    select.after(box);
+    select._combo = {input, toggle, menu};
+    const open = () => {
+      for (const other of document.querySelectorAll(".select-menu")) {
+        if (other !== menu) other.hidden = true;
+      }
+      for (const other of document.querySelectorAll(".select-display")) {
+        if (other !== input) other.setAttribute("aria-expanded", "false");
+      }
+      menu.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    };
+    const close = () => {
+      menu.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+    };
+    input.addEventListener("click", () => {
+      if (menu.hidden) open(); else close();
+    });
+    toggle.addEventListener("click", () => {
+      if (menu.hidden) open(); else close();
+    });
+    input.addEventListener("keydown", event => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        open();
+      } else if (event.key === "Escape") {
+        close();
+      }
+    });
+    box.addEventListener("click", event => event.stopPropagation());
+    select.addEventListener("change", () => refreshSelectCombo(select));
+    document.addEventListener("click", () => close());
+    refreshSelectCombo(select);
+  }
+
   function renderPolicies(policies) {
     policyList.replaceChildren();
     for (const policy of policies) {
@@ -1103,6 +1236,141 @@
 
       row.append(permissionLabel, limitLabel, resetLabel);
       policyList.append(row);
+      enhanceSelect(permission);
+    }
+  }
+
+  function setUserQuotaStatus(message, isError = false) {
+    const status = document.querySelector("#user-quota-status");
+    status.textContent = message || "";
+    status.className = isError ? "error" : "";
+  }
+
+  function resetUserQuotaForm() {
+    userQuotaEditIndex = -1;
+    document.querySelector("#user-quota-qq").value = "";
+    document.querySelector("#user-quota-extra").value = "1";
+    document.querySelector("#user-quota-save").textContent = "添加额度";
+    setUserQuotaStatus("");
+  }
+
+  function baseCommandLimit(settings, command) {
+    const policy = (settings.commands.policies || []).find(item => item.command === command);
+    return policy ? policy.limit : 0;
+  }
+
+  function renderUserQuotas(settings) {
+    const select = document.querySelector("#user-quota-command");
+    const selected = select.value;
+    select.replaceChildren();
+    for (const policy of settings.commands.policies || []) {
+      const option = make("option", "", policy.command);
+      option.value = policy.command;
+      select.append(option);
+    }
+    if (selected) select.value = selected;
+    enhanceSelect(select);
+
+    const list = document.querySelector("#user-quota-list");
+    list.replaceChildren();
+    const quotas = settings.user_quotas || [];
+    if (!quotas.length) {
+      list.append(make("div", "placeholder", "还没有单独配置额外次数的用户喵～"));
+      return;
+    }
+    quotas.slice().sort((a, b) => a.user_id.localeCompare(b.user_id) || a.command.localeCompare(b.command)).forEach(quota => {
+      const index = quotas.indexOf(quota);
+      const base = baseCommandLimit(settings, quota.command);
+      const row = make("div", "user-quota-row");
+      const main = make("div", "user-quota-main");
+      main.append(make("div", "user-quota-qq", `QQ ${quota.user_id}`));
+      main.append(make("div", "user-quota-detail",
+        base > 0
+          ? `${quota.command}：基础 ${base} 次 + 额外 ${quota.extra_count} 次 = ${base + quota.extra_count} 次`
+          : `${quota.command}：当前不限次数，额外配置暂不生效`
+      ));
+      row.append(main);
+      const actions = make("div", "actions");
+      const edit = make("button", "maibot-button", "编辑");
+      const remove = make("button", "maibot-button task-delete", "删除");
+      edit.type = "button";
+      remove.type = "button";
+      edit.addEventListener("click", () => {
+        userQuotaEditIndex = index;
+        document.querySelector("#user-quota-qq").value = quota.user_id;
+        document.querySelector("#user-quota-command").value = quota.command;
+        document.querySelector("#user-quota-extra").value = String(quota.extra_count);
+        document.querySelector("#user-quota-save").textContent = "保存修改";
+        setUserQuotaStatus(`正在编辑 QQ ${quota.user_id} 的「${quota.command}」`);
+      });
+      remove.addEventListener("click", () => void deleteUserQuota(index));
+      actions.append(edit, remove);
+      row.append(actions);
+      list.append(row);
+    });
+  }
+
+  async function persistUserQuotas(quotas) {
+    if (!settingsData) await loadSettings();
+    const next = structuredClone(settingsData);
+    next.user_quotas = quotas;
+    const result = await request("action", "save_settings", {settings_json: JSON.stringify(next)});
+    if (result && result.error) throw new Error(result.error);
+    settingsData = next;
+    settingsLoaded = false;
+    await loadSettings();
+  }
+
+  async function saveUserQuota() {
+    const qq = document.querySelector("#user-quota-qq").value.trim();
+    const command = document.querySelector("#user-quota-command").value;
+    const extra = Number(document.querySelector("#user-quota-extra").value);
+    if (!/^\d{5,20}$/.test(qq)) {
+      setUserQuotaStatus("QQ 号必须是 5-20 位数字", true);
+      return;
+    }
+    if (!Number.isInteger(extra) || extra < 1) {
+      setUserQuotaStatus("额外次数必须是大于 0 的整数", true);
+      return;
+    }
+    if (!settingsData) await loadSettings();
+    const quotas = (settingsData.user_quotas || []).map(item => ({...item}));
+    if (userQuotaEditIndex >= 0) {
+      quotas[userQuotaEditIndex] = {user_id: qq, command, extra_count: extra};
+    } else {
+      quotas.push({user_id: qq, command, extra_count: extra});
+    }
+    const seen = new Set();
+    for (const quota of quotas) {
+      const key = `${quota.user_id}\n${quota.command}`;
+      if (seen.has(key)) {
+        setUserQuotaStatus("这个 QQ 已经配置过该指令的额外次数", true);
+        return;
+      }
+      seen.add(key);
+    }
+    const button = document.querySelector("#user-quota-save");
+    button.disabled = true;
+    try {
+      await persistUserQuotas(quotas);
+      resetUserQuotaForm();
+      setUserQuotaStatus("用户额度已保存，新请求立即生效");
+    } catch (error) {
+      setUserQuotaStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function deleteUserQuota(index) {
+    if (!await confirmAction("确认删除这条用户额外次数配置？")) return;
+    const quotas = (settingsData.user_quotas || []).filter((_, itemIndex) => itemIndex !== index);
+    try {
+      await persistUserQuotas(quotas);
+      resetUserQuotaForm();
+      setUserQuotaStatus("用户额度已删除");
+    } catch (error) {
+      setUserQuotaStatus(error.message || String(error), true);
     }
   }
 
@@ -1111,6 +1379,7 @@
     document.querySelector("#setting-view-templates").value = settings.keywords.view_templates.join("\n");
     document.querySelector("#setting-list-templates").value = settings.keywords.list_templates.join("\n");
     document.querySelector("#setting-help-templates").value = settings.keywords.help_templates.join("\n");
+    document.querySelector("#setting-ranking-templates").value = settings.keywords.ranking_templates.join("\n");
     document.querySelector("#setting-max-name-length").value = String(settings.library.max_name_length);
     document.querySelector("#setting-max-image-mb").value = String(settings.library.max_image_mb);
     document.querySelector("#setting-drawing-replace-templates").value = settings.drawing.replace_templates.join("\n");
@@ -1121,9 +1390,11 @@
     document.querySelector("#setting-drawing-together-prompt").value = settings.drawing.together_prompt;
     document.querySelector("#setting-drawing-group-prompt").value = settings.drawing.group_prompt;
     document.querySelector("#setting-drawing-fallback-prompt").value = settings.drawing.fallback_prompt;
+    document.querySelector("#setting-drawing-extra-prefix").value = settings.drawing.extra_prompt_prefix;
     document.querySelector("#setting-drawing-min-roles").value = String(settings.drawing.min_group_roles);
     document.querySelector("#setting-drawing-max-roles").value = String(settings.drawing.max_group_roles);
     document.querySelector("#setting-queue-concurrent").value = String(settings.task_queue.max_concurrent_tasks);
+    document.querySelector("#setting-queue-interval").value = String(settings.task_queue.task_interval_seconds);
     document.querySelector("#setting-queue-waiting").value = String(settings.task_queue.max_waiting_tasks);
     document.querySelector("#setting-queue-timeout").value = String(settings.task_queue.task_timeout_seconds);
     document.querySelector("#setting-queue-poll").value = String(settings.task_queue.poll_interval_seconds);
@@ -1135,6 +1406,7 @@
     document.querySelector("#setting-groups").value = settings.access.group_whitelist.join("\n");
     document.querySelector("#setting-private").value = settings.access.private_whitelist.join("\n");
     renderPolicies(settings.commands.policies);
+    renderUserQuotas(settings);
   }
 
   function collectPolicies() {
@@ -1167,7 +1439,8 @@
         register_templates: parseTemplateList(document.querySelector("#setting-register-templates").value),
         view_templates: parseTemplateList(document.querySelector("#setting-view-templates").value),
         list_templates: parseTemplateList(document.querySelector("#setting-list-templates").value),
-        help_templates: parseTemplateList(document.querySelector("#setting-help-templates").value)
+        help_templates: parseTemplateList(document.querySelector("#setting-help-templates").value),
+        ranking_templates: parseTemplateList(document.querySelector("#setting-ranking-templates").value)
       },
       library: {
         max_name_length: Number(document.querySelector("#setting-max-name-length").value),
@@ -1182,11 +1455,13 @@
         together_prompt: document.querySelector("#setting-drawing-together-prompt").value,
         group_prompt: document.querySelector("#setting-drawing-group-prompt").value,
         fallback_prompt: document.querySelector("#setting-drawing-fallback-prompt").value,
+        extra_prompt_prefix: document.querySelector("#setting-drawing-extra-prefix").value,
         min_group_roles: Number(document.querySelector("#setting-drawing-min-roles").value),
         max_group_roles: Number(document.querySelector("#setting-drawing-max-roles").value)
       },
       task_queue: {
         max_concurrent_tasks: Number(document.querySelector("#setting-queue-concurrent").value),
+        task_interval_seconds: Number(document.querySelector("#setting-queue-interval").value),
         max_waiting_tasks: Number(document.querySelector("#setting-queue-waiting").value),
         task_timeout_seconds: Number(document.querySelector("#setting-queue-timeout").value),
         poll_interval_seconds: Number(document.querySelector("#setting-queue-poll").value),
@@ -1200,7 +1475,8 @@
         group_whitelist: parseIdList(document.querySelector("#setting-groups").value),
         private_whitelist: parseIdList(document.querySelector("#setting-private").value)
       },
-      commands: {policies: collectPolicies()}
+      commands: {policies: collectPolicies()},
+      user_quotas: settingsData ? settingsData.user_quotas : []
     };
     button.disabled = true;
     setSettingsStatus("正在保存…");
@@ -1403,6 +1679,7 @@
     for (const button of moduleButtons) button.classList.toggle("active", button.dataset.module === name);
     for (const section of modules) section.hidden = section.id !== `module-${name}`;
     if (name === "settings") void loadSettings();
+    if (name === "users") void loadSettings();
     if (name === "replies") void loadReplies();
     if (name === "api") void loadDrawingApi();
     if (name === "draw") void loadCurrentTasks();
@@ -1934,6 +2211,8 @@
     button.addEventListener("click", () => activateModule(button.dataset.module));
   }
   document.querySelector("#settings-save").addEventListener("click", saveSettings);
+  document.querySelector("#user-quota-save").addEventListener("click", () => void saveUserQuota());
+  document.querySelector("#user-quota-reset").addEventListener("click", resetUserQuotaForm);
   document.querySelector("#replies-refresh").addEventListener("click", () => void loadReplies());
   document.querySelector("#replies-save").addEventListener("click", saveReplies);
   document.querySelector("#api-save").addEventListener("click", saveDrawingApi);
@@ -1998,6 +2277,9 @@
   async function start() {
     try {
       await maibot.ready;
+      for (const id of ["sort", "history-status-filter", "user-quota-command"]) {
+        enhanceSelect(document.querySelector(`#${id}`));
+      }
       activateModule("roles");
       await load(1);
     } catch (error) {

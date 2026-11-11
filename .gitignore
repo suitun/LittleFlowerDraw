@@ -5,6 +5,7 @@
 /temp/
 /logs/
 /drawings/
+/tmp*/
 .env
 .env.*
 __pycache__/

@@ -3,7 +3,7 @@
 from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempdir import TemporaryDirectory
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, patch
 
@@ -510,6 +510,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
             task = await self.current_task()
             finished = await self.wait_task(task.id)
             self.assertEqual(finished.status, "succeeded")
+            self.assertTrue(finished.final_prompt.endswith("注意用户额外需求：红色外套"))
             settings = self.plugin._settings_store.current()
             self.assertEqual(
                 self.rpc.texts,
@@ -568,6 +569,31 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(finished.status, "succeeded")
         self.assertEqual(self.rpc.images, [generated])
         self.assertEqual(self.rpc.at_targets, [])
+
+    async def test_ranking_command_renders_successful_role_counts(self) -> None:
+        for index, names in enumerate((["甲"], ["甲", "乙"])):
+            task = await asyncio.to_thread(
+                self.plugin._task_store.create_task,
+                command_id="单角色替换",
+                kind="replace",
+                requester_id=f"ranking-user-{index}",
+                group_id="group-a",
+                account_id="account-a",
+                scope="group-a",
+                source_message_id=f"ranking-message-{index}",
+                source_key=f"ranking-message-{index}",
+                role_names=names,
+                extra_prompt="",
+                final_prompt="画图",
+                reference_image=b"",
+                api_model="gpt-image-2",
+                api_size="auto",
+            )
+            await asyncio.to_thread(self.plugin._task_store.succeed, task.id, "")
+        self.clear_output()
+        await self.submit(self.message("小猪排行榜"))
+        self.assertEqual(len(self.rpc.images), 1)
+        self.assertTrue(self.rpc.images[0].startswith(b"\x89PNG"))
 
     async def test_free_drawing_uses_fallback_prompt_and_no_reference(self) -> None:
         self.set_drawing_api()
@@ -680,13 +706,12 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(invalid["saved"])
         self.assertIn("http", invalid["error"])
 
-    def test_drawing_image_is_saved_under_plugin_drawings_directory(self) -> None:
+    def test_drawing_image_is_saved_under_configured_data_directory(self) -> None:
         with TemporaryDirectory() as directory:
-            plugin_file = Path(directory) / "plugin.py"
-            with patch.object(PLUGIN_MODULE, "__file__", str(plugin_file)):
-                path = PLUGIN_MODULE.LittleFlowerDrawPlugin._save_drawing_image(png("blue"), "replace")
+            root = Path(directory) / "drawings"
+            path = PLUGIN_MODULE.LittleFlowerDrawPlugin._save_drawing_image(png("blue"), "replace", root)
             self.assertTrue(path.is_file())
-            self.assertEqual(path.parent.parent, (plugin_file.parent / "drawings").resolve())
+            self.assertEqual(path.parent.parent, root.resolve())
             self.assertEqual(path.suffix, ".png")
 
     async def test_task_records_requester_names_and_reference_preview(self) -> None:
@@ -751,11 +776,11 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.submit(self.message("小花小花这是 不合规角色", [png("red")]))
         self.set_drawing_api()
         self.clear_output()
-        long_detail = "上游返回了很长的错误详情" * 100
+        category = "接口返回 400：图片或提示词内容未通过接口审核"
         with patch.object(
             PLUGIN_MODULE.OpenAIImageClient,
             "generate",
-            side_effect=PLUGIN_MODULE.DrawingApiError(long_detail, status_code=400),
+            side_effect=PLUGIN_MODULE.DrawingApiError(category, status_code=400),
         ):
             await self.submit(self.message("变不合规角色 红色外套", [png("white")]))
             task = await self.current_task()
@@ -765,14 +790,14 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     break
                 await asyncio.sleep(0.02)
         self.assertEqual(finished.status, "failed")
-        self.assertEqual(finished.error, "图片不符合接口要求")
+        self.assertEqual(finished.error, category)
         self.assertEqual(
             self.rpc.texts[-1],
             PLUGIN_MODULE.render_task_reply(
                 self.plugin._settings_store.current().drawing.image_rejected_reply, task.id
             ),
         )
-        self.assertNotIn("很长的错误详情", self.rpc.texts[-1])
+        self.assertNotIn(category, self.rpc.texts[-1])
 
     async def test_drawing_rejects_missing_reference_missing_role_and_bad_group_count(self) -> None:
         await self.submit(self.message("小花小花这是 角色A", [png("red")]))
@@ -810,6 +835,16 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded["commands"]["policies"][0]["permission"], "仅管理员")
         self.assertEqual(loaded["library"]["max_image_mb"], 12)
         self.assertTrue(self.plugin._settings_store.path.is_file())
+
+    async def test_webui_settings_save_preserves_and_updates_user_quotas(self) -> None:
+        settings = await self.plugin.webui_settings()
+        settings["user_quotas"] = [
+            {"user_id": "20001", "command": "登记角色", "extra_count": 4}
+        ]
+        saved = await self.plugin.webui_settings_save(json.dumps(settings, ensure_ascii=False))
+        loaded = await self.plugin.webui_settings()
+        self.assertTrue(saved["saved"])
+        self.assertEqual(loaded["user_quotas"][0]["extra_count"], 4)
 
     async def test_webui_settings_save_accepts_partial_payload_and_preserves_replies(self) -> None:
         before = await self.plugin.webui_settings()

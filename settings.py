@@ -47,6 +47,10 @@ class KeywordConfig(PluginConfigBase):
         default_factory=lambda: ["小花绘帮助"],
         description="帮助触发模板。不能包含占位符；可添加多条别名。",
     )
+    ranking_templates: List[str] = Field(
+        default_factory=lambda: ["小猪排行榜"],
+        description="角色绘图次数排行榜触发模板。不能包含占位符；可添加多条别名。",
+    )
 
     @model_validator(mode="after")
     def validate_templates(self) -> "KeywordConfig":
@@ -55,6 +59,7 @@ class KeywordConfig(PluginConfigBase):
             self.view_templates,
             self.list_templates,
             self.help_templates,
+            self.ranking_templates,
         )
         return self
 

@@ -64,28 +64,33 @@ def validate_trigger_groups(
     view: List[str],
     list_templates: Optional[List[str]] = None,
     help_templates: Optional[List[str]] = None,
+    ranking_templates: Optional[List[str]] = None,
 ) -> None:
     """禁止空规则集及两个操作使用相同模板。"""
     list_templates = list_templates or []
     help_templates = help_templates or []
+    ranking_templates = ranking_templates or []
     if not list_templates:
         raise ValueError("角色列表至少需要一个触发模板")
     if not help_templates:
         raise ValueError("帮助指令至少需要一个触发模板")
+    if not ranking_templates:
+        raise ValueError("排行榜至少需要一个触发模板")
     seen = set()
     for templates, compiler in (
         (register, compile_trigger),
         (view, compile_trigger),
         (list_templates, compile_list_trigger),
         (help_templates, compile_list_trigger),
+        (ranking_templates, compile_list_trigger),
     ):
         if not templates:
-            raise ValueError("登记、查看、角色列表和帮助各需要至少一个触发模板")
+            raise ValueError("登记、查看、角色列表、帮助和排行榜各需要至少一个触发模板")
         for template in templates:
             compiler(template)
             key = normalize_template_key(template)
             if key in seen:
-                raise ValueError("登记、查看、角色列表和帮助触发模板不能重复")
+                raise ValueError("登记、查看、角色列表、帮助和排行榜触发模板不能重复")
             seen.add(key)
 
 
@@ -95,6 +100,7 @@ def match_request(
     view: List[str],
     list_templates: Optional[List[str]] = None,
     help_templates: Optional[List[str]] = None,
+    ranking_templates: Optional[List[str]] = None,
     *,
     mentioned_bot: bool = False,
 ) -> Optional[RoleRequest]:
@@ -106,12 +112,13 @@ def match_request(
     ]
     rules.extend(("list", template) for template in (list_templates or []))
     rules.extend(("help", template) for template in (help_templates or []))
+    rules.extend(("ranking", template) for template in (ranking_templates or []))
     rules.sort(key=lambda item: len(normalize_template_key(item[1])), reverse=True)
     for action, template in rules:
         requires_at, body = split_mention_requirement(template)
         if requires_at and not mentioned_bot:
             continue
-        if action in {"list", "help"}:
+        if action in {"list", "help", "ranking"}:
             match = compile_list_trigger(body).fullmatch(text)
             if match is not None:
                 return RoleRequest(action, "")

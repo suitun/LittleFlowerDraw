@@ -10,6 +10,7 @@ import asyncio
 import base64
 import io
 import json
+import time
 import unicodedata
 import uuid
 
@@ -36,7 +37,7 @@ from .drawing_tasks import (
     QueueFullError,
     TaskRecord,
 )
-from .help_image import render_help_image
+from .help_image import render_help_image, render_ranking_image
 from .role_messages import (
     CorruptImageError,
     ImageInputError,
@@ -134,6 +135,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         self._task_running: Set[asyncio.Task[None]] = set()
         self._task_wakeup = asyncio.Event()
         self._task_submit_lock = asyncio.Lock()
+        self._last_task_finished_at = 0.0
         self._pending_writes: Set[asyncio.Task[bool]] = set()
         self._seen_messages: OrderedDict[Tuple[str, ...], None] = OrderedDict()
         self._stream_is_group: Dict[str, bool] = {}
@@ -234,6 +236,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             settings.keywords.view_templates,
             settings.keywords.list_templates,
             settings.keywords.help_templates,
+            settings.keywords.ranking_templates,
             mentioned_bot=mentioned_bot,
         )
         drawing = None
@@ -351,6 +354,10 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             return
         if not await self.ctx.send.image(content, stream_id):
             raise ReplyDeliveryError("帮助图片发送失败")
+
+    async def _send_image_only(self, image: bytes, stream_id: str, label: str) -> None:
+        if not await self.ctx.send.image(base64.b64encode(image).decode("ascii"), stream_id):
+            raise ReplyDeliveryError(f"{label}发送失败")
 
     async def _send_role_view(
         self,
@@ -590,7 +597,8 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             }[candidate.kind]
             prompt = base_prompt.strip()
             if candidate.extra_prompt:
-                prompt = f"{prompt}\n{candidate.extra_prompt}"
+                prefix = settings.drawing.extra_prompt_prefix.strip()
+                prompt = f"{prompt}\n{prefix}{candidate.extra_prompt}" if prefix else f"{prompt}\n{candidate.extra_prompt}"
         message_id = str(job.message.get("message_id") or "")
         account_id = str(job.message.get("account_id") or "")
         scope = str(job.message.get("scope") or "")
@@ -692,6 +700,9 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                     continue
                 config = settings.task_queue
                 if not config.queue_paused and len(self._task_running) < config.max_concurrent_tasks:
+                    remaining = config.task_interval_seconds - (time.monotonic() - self._last_task_finished_at)
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
                     async with self._task_submit_lock:
                         task = await asyncio.to_thread(task_store.claim_next)
                     if task is not None:
@@ -744,7 +755,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         except DrawingApiError as error:
             self.ctx.logger.warning("小花绘任务 #%s API 调用失败：%s", task.id, error)
             if error.status_code == 400:
-                await self._fail_task(task, "图片不符合接口要求", reply_key="image_rejected_reply")
+                await self._fail_task(task, str(error), reply_key="image_rejected_reply")
             else:
                 await self._fail_task(task, str(error))
         except asyncio.CancelledError:
@@ -752,6 +763,8 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         except Exception as error:
             self.ctx.logger.exception("小花绘任务 #%s 执行失败", task.id)
             await self._fail_task(task, str(error))
+        finally:
+            self._last_task_finished_at = time.monotonic()
 
     def _task_message(self, task: TaskRecord) -> Dict[str, Any]:
         info: Dict[str, Any] = {"user_info": {"user_id": task.requester_id, "user_nickname": ""}}
@@ -804,7 +817,12 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 [reference, *role_images],
             )
         await asyncio.to_thread(task_store.set_stage, task.id, "saving")
-        path = await asyncio.to_thread(self._save_drawing_image, result.image, task.kind)
+        path = await asyncio.to_thread(
+            self._save_drawing_image,
+            result.image,
+            task.kind,
+            self.ctx.paths.data_dir / "drawings",
+        )
         await asyncio.to_thread(task_store.succeed, task.id, str(path))
         try:
             await self._send_completion(task, stream_id, result.image)
@@ -888,8 +906,8 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 self.ctx.logger.exception("小花绘任务 #%s 失败提示未能送达", record.id)
 
     @staticmethod
-    def _save_drawing_image(image: bytes, kind: str) -> Path:
-        root = (Path(__file__).resolve().parent / "drawings").resolve()
+    def _save_drawing_image(image: bytes, kind: str, root: Optional[Path] = None) -> Path:
+        root = (root or (Path(__file__).resolve().parent / "drawings")).resolve()
         now = datetime.now()
         directory = root / now.strftime("%Y-%m-%d")
         directory.mkdir(parents=True, exist_ok=True)
@@ -920,6 +938,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                         ("登记角色", settings.keywords.register_templates),
                         ("查看角色", settings.keywords.view_templates),
                         ("角色列表", settings.keywords.list_templates),
+                        ("排行榜", settings.keywords.ranking_templates),
                     ),
                 ),
                 (
@@ -941,6 +960,18 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 "模板开头的 @ 表示要先 @ 小花；更多别名可在插件设置里查看。",
             )
             await self._send_help_image(settings.replies, image, stream_id, user_id)
+            return True
+        if job.request.action == "ranking":
+            counts = await asyncio.to_thread(self._require_task_store().role_draw_counts)
+            total = sum(count for _, count in counts)
+            image = await asyncio.to_thread(
+                render_ranking_image,
+                "小猪排行榜",
+                counts,
+                f"共 {len(counts)} 个角色 · {total} 次成功绘图",
+                "失败、取消和自由绘画不计入。",
+            )
+            await self._send_image_only(image, stream_id, "排行榜")
             return True
         if job.request.action == "list":
             names = await asyncio.to_thread(store.list_names, GLOBAL_LIBRARY_SCOPE)

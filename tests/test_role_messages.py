@@ -1,7 +1,7 @@
 """角色消息的真实图片验证、引用解析与有界下载测试。"""
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempdir import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call, patch
 from urllib.error import HTTPError, URLError

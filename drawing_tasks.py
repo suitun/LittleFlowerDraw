@@ -457,6 +457,24 @@ class DrawingTaskStore:
                 raise
         return record
 
+    def role_draw_counts(self) -> List[Tuple[str, int]]:
+        """按角色统计成功绘图任务次数，历史任务一并计入。"""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT role_names_json FROM drawing_tasks WHERE status = 'succeeded'"
+            ).fetchall()
+        counts: dict[str, int] = {}
+        for (raw,) in rows:
+            try:
+                names = json.loads(raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(names, list):
+                continue
+            for name in {str(value).strip() for value in names if str(value).strip()}:
+                counts[name] = counts.get(name, 0) + 1
+        return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
     def cancel(self, task_id: int) -> Optional[TaskRecord]:
         """取消排队中的任务；任务不存在或已在运行/结束时返回 None。"""
         with self._connection() as connection:

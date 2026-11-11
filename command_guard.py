@@ -36,6 +36,19 @@ class CommandGuard:
                 return policy
         raise ValueError(f"指令未配置权限: {command_id}")
 
+    @staticmethod
+    def quota_limit(settings: WebUISettings, command_id: str, user_id: str) -> int:
+        """基础次数加上该用户在这一指令上的额外次数；0 表示不限。"""
+        policy = CommandGuard.policy_for(settings, command_id)
+        if policy.limit <= 0:
+            return 0
+        extra = sum(
+            quota.extra_count
+            for quota in settings.user_quotas
+            if quota.user_id == user_id and quota.command == command_id
+        )
+        return policy.limit + extra
+
     def check_access(self, command_id: str, user_id: str, group_id: str) -> AccessDecision:
         """检查白名单和权限；管理员始终放行。"""
         settings = self._settings_store.current()
@@ -65,7 +78,8 @@ class CommandGuard:
         if self.is_admin(settings, user_id):
             return None
         policy = self.policy_for(settings, command_id)
-        status = self._usage_store.check(user_id, command_id, policy.limit, policy.reset_days)
+        limit = self.quota_limit(settings, command_id, user_id)
+        status = self._usage_store.check(user_id, command_id, limit, policy.reset_days)
         if status.allowed:
             return None
         return render_guard_reply(
@@ -80,7 +94,8 @@ class CommandGuard:
         if self.is_admin(settings, user_id):
             return 0
         policy = self.policy_for(settings, command_id)
-        return self._usage_store.record_success(user_id, command_id, policy.limit, policy.reset_days)
+        limit = self.quota_limit(settings, command_id, user_id)
+        return self._usage_store.record_success(user_id, command_id, limit, policy.reset_days)
 
     def refund_task(self, task_id: int, command_id: str, user_id: str, window_start: int) -> bool:
         """任务失败或被取消时按任务 ID 退还一次。"""
