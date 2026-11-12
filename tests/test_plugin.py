@@ -521,6 +521,14 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(self.rpc.images, [generated])
             self.assertEqual(self.rpc.at_targets, ["20001"])
+            hybrids = [call for call in self.rpc.calls if call["capability"] == "send.hybrid"]
+            self.assertFalse(any(
+                segment["type"] == "image"
+                for call in hybrids
+                for segment in call["args"]["segments"]
+            ))
+            image_calls = [call for call in self.rpc.calls if call["capability"] == "send.image"]
+            self.assertEqual(len(image_calls), 1)
 
             self.clear_output()
             await self.submit(self.message("角色A角色B一起穿 同框合影", [reference]))
@@ -535,6 +543,14 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(self.rpc.images, [generated])
             self.assertEqual(self.rpc.at_targets, ["20001"])
+            hybrids = [call for call in self.rpc.calls if call["capability"] == "send.hybrid"]
+            self.assertFalse(any(
+                segment["type"] == "image"
+                for call in hybrids
+                for segment in call["args"]["segments"]
+            ))
+            image_calls = [call for call in self.rpc.calls if call["capability"] == "send.image"]
+            self.assertEqual(len(image_calls), 1)
 
             self.clear_output()
             await self.submit(self.message("多人穿@角色A@角色B@角色C 游乐园", [reference]))
@@ -627,7 +643,65 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing["models"], [])
         self.assertIn("API URL", missing["error"])
 
-    async def test_task_history_detail_retry_and_bulk_delete(self) -> None:
+    async def test_upstream_502_retries_twice_without_failure_reply(self) -> None:
+        await self.submit(self.message("小花小花这是 重试角色", [png("red")]))
+        self.set_drawing_api()
+        generated = png("blue")
+        output = Path(self.temporary.name) / "retry-output.png"
+        errors = [
+            PLUGIN_MODULE.DrawingApiError("上游 502", status_code=502),
+            PLUGIN_MODULE.DrawingApiError("上游 502", status_code=502),
+        ]
+        with patch.object(PLUGIN_MODULE, "API_502_RETRY_DELAY", 0), patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate",
+            side_effect=[*errors, PLUGIN_MODULE.DrawingResult(generated, "prompt")],
+        ) as generate, patch.object(
+            PLUGIN_MODULE.LittleFlowerDrawPlugin, "_save_drawing_image", return_value=output
+        ):
+            self.clear_output()
+            await self.submit(self.message("变重试角色 红色外套", [png("white")]))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+        self.assertEqual(finished.status, "succeeded")
+        self.assertEqual(generate.call_count, 3)
+        self.assertEqual(finished.attempts, 3)
+        self.assertEqual(
+            self.rpc.texts,
+            [
+                PLUGIN_MODULE.render_task_reply(
+                    self.plugin._settings_store.current().drawing.submitted_reply, task.id, 0
+                ),
+                PLUGIN_MODULE.render_task_reply(
+                    self.plugin._settings_store.current().drawing.completion_reply, task.id
+                ),
+            ],
+        )
+
+    async def test_upstream_502_fails_after_two_retries_with_single_failure_reply(self) -> None:
+        await self.submit(self.message("小花小花这是 重试失败角色", [png("red")]))
+        self.set_drawing_api()
+        errors = [
+            PLUGIN_MODULE.DrawingApiError("上游 502", status_code=502)
+            for _ in range(3)
+        ]
+        with patch.object(PLUGIN_MODULE, "API_502_RETRY_DELAY", 0), patch.object(
+            PLUGIN_MODULE.OpenAIImageClient, "generate", side_effect=errors
+        ) as generate:
+            self.clear_output()
+            await self.submit(self.message("变重试失败角色 红色外套", [png("white")]))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+            for _ in range(100):
+                if len(self.rpc.texts) >= 2:
+                    break
+                await asyncio.sleep(0.02)
+        self.assertEqual(finished.status, "failed")
+        self.assertEqual(generate.call_count, 3)
+        self.assertEqual(len(self.rpc.texts), 2)
+        self.assertIn("上游 502", self.rpc.texts[-1])
+
+    async def test_task_history_retry_keeps_same_id_and_bulk_delete(self) -> None:
         reference = png("white")
         await self.submit(self.message("小花小花这是 角色A", [png("red")]))
         self.set_drawing_api()
@@ -636,25 +710,38 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             PLUGIN_MODULE.OpenAIImageClient,
             "generate",
-            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
-        ), patch.object(PLUGIN_MODULE.LittleFlowerDrawPlugin, "_save_drawing_image", return_value=output):
+            side_effect=PLUGIN_MODULE.DrawingApiError("上游失败", status_code=500),
+        ):
             await self.submit(self.message("变角色A 红色外套", [reference]))
             first = await self.current_task()
             await self.wait_task(first.id)
-            history = await self.plugin.webui_task_history()
-            self.assertEqual(history["total"], 1)
-            detail = await self.plugin.webui_task_detail(first.id)
-            self.assertEqual(detail["id"], first.id)
-            self.assertIn("角色A", detail["role_names"])
+        history = await self.plugin.webui_task_history()
+        self.assertEqual(history["total"], 1)
+        detail = await self.plugin.webui_task_detail(first.id)
+        self.assertEqual(detail["id"], first.id)
+        self.assertTrue(detail["can_retry"])
+        self.assertIn("角色A", detail["role_names"])
+        settings = self.plugin._settings_store.current()
+        settings.task_queue.task_interval_seconds = 0
+        self.plugin._settings_store.save(settings)
 
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate",
+            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
+        ), patch.object(PLUGIN_MODULE.LittleFlowerDrawPlugin, "_save_drawing_image", return_value=output):
             retried = await self.plugin.webui_task_retry(first.id)
             self.assertTrue(retried["retried"])
-            await self.wait_task(retried["task_id"])
-            self.assertEqual((await self.plugin.webui_task_history())["total"], 2)
+            self.assertEqual(retried["task_id"], first.id)
+            await self.wait_task(first.id)
 
-            deleted = await self.plugin.webui_task_delete(json.dumps([first.id, retried["task_id"]]))
-            self.assertEqual(deleted["deleted"], 2)
-            self.assertEqual((await self.plugin.webui_task_history())["total"], 0)
+        self.assertEqual((await self.plugin.webui_task_history())["total"], 1)
+        self.assertFalse((await self.plugin.webui_task_detail(first.id))["can_retry"])
+        self.assertFalse((await self.plugin.webui_task_retry(first.id))["retried"])
+
+        deleted = await self.plugin.webui_task_delete(json.dumps([first.id]))
+        self.assertEqual(deleted["deleted"], 1)
+        self.assertEqual((await self.plugin.webui_task_history())["total"], 0)
 
     async def test_one_active_task_per_user_blocks_second_submission(self) -> None:
         reference = png("white")

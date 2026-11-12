@@ -457,6 +457,26 @@ class DrawingTaskStore:
                 raise
         return record
 
+    def note_attempt(self, task_id: int) -> None:
+        """记录一次自动重试，便于历史详情展示尝试次数。"""
+        with self._connection() as connection, connection:
+            connection.execute(
+                "UPDATE drawing_tasks SET attempts = attempts + 1 WHERE id = ?", (task_id,)
+            )
+
+    def retry(self, task_id: int) -> Optional[TaskRecord]:
+        """把失败或取消的任务重新放回队列，保留原任务 ID。"""
+        with self._connection() as connection, connection:
+            cursor = connection.execute(
+                "UPDATE drawing_tasks SET status = 'queued', stage = '', error = '', output_path = '', "
+                "started_at = 0, finished_at = 0, quota_counted = 0, quota_window_start = 0, quota_refunded = 0 "
+                "WHERE id = ? AND status IN ('failed', 'cancelled')",
+                (task_id,),
+            )
+            if cursor.rowcount == 0:
+                return None
+            return self._require(connection, task_id)
+
     def role_draw_counts(self) -> List[Tuple[str, int]]:
         """按角色统计成功绘图任务次数，历史任务一并计入。"""
         with self._connection() as connection:

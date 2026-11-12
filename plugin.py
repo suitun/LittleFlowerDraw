@@ -67,8 +67,7 @@ from .role_patterns import (
     valid_role_name,
 )
 from .role_store import RoleStore
-from .role_webui import (
-    CACHE_DIR_NAME,
+from .role_webui import (    CACHE_DIR_NAME,
     data_url,
     detail_payload,
     list_payload,
@@ -81,6 +80,8 @@ from .webui_settings import WebUISettings, WebUISettingsStore, load_legacy_setti
 
 
 GLOBAL_LIBRARY_SCOPE = "global"
+API_502_RETRY_LIMIT = 2
+API_502_RETRY_DELAY = 3.0
 
 
 def _merge_settings(base: Dict[str, Any], updates: Dict[str, Any]) -> None:
@@ -613,8 +614,10 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             )
         )
         user_info = job.message.get("message_info", {}).get("user_info", {})
-        requester_group_name = str(user_info.get("user_cardname") or "")
-        requester_qq_name = str(user_info.get("user_nickname") or "")
+        requester_group_name = str(user_info.get("user_cardname") or "").strip()
+        requester_qq_name = str(user_info.get("user_nickname") or "").strip()
+        if requester_qq_name == user_id:
+            requester_qq_name = ""
         try:
             async with self._task_submit_lock:
                 task = await asyncio.to_thread(
@@ -748,21 +751,42 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
     async def _process_drawing_task(self, task: TaskRecord) -> None:
         settings = self._settings_store.current() if self._settings_store is not None else None
         timeout = settings.task_queue.task_timeout_seconds if settings is not None else 600
+        task_store = self._task_store
+        retry_count = 0
         try:
-            await asyncio.wait_for(self._execute_drawing_task(task), timeout=timeout)
-        except asyncio.TimeoutError:
-            await self._fail_task(task, "任务执行超时")
-        except DrawingApiError as error:
-            self.ctx.logger.warning("小花绘任务 #%s API 调用失败：%s", task.id, error)
-            if error.status_code == 400:
-                await self._fail_task(task, str(error), reply_key="image_rejected_reply")
-            else:
-                await self._fail_task(task, str(error))
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            self.ctx.logger.exception("小花绘任务 #%s 执行失败", task.id)
-            await self._fail_task(task, str(error))
+            while True:
+                try:
+                    await asyncio.wait_for(self._execute_drawing_task(task), timeout=timeout)
+                    return
+                except DrawingApiError as error:
+                    self.ctx.logger.warning("小花绘任务 #%s API 调用失败：%s", task.id, error)
+                    if error.status_code == 502 and retry_count < API_502_RETRY_LIMIT:
+                        retry_count += 1
+                        self.ctx.logger.info(
+                            "小花绘任务 #%s 遇到上游 502，自动重试 %s/%s",
+                            task.id,
+                            retry_count,
+                            API_502_RETRY_LIMIT,
+                        )
+                        if task_store is not None:
+                            await asyncio.to_thread(task_store.note_attempt, task.id)
+                            await asyncio.to_thread(task_store.set_stage, task.id, "retrying")
+                        await asyncio.sleep(API_502_RETRY_DELAY)
+                        continue
+                    if error.status_code == 400:
+                        await self._fail_task(task, str(error), reply_key="image_rejected_reply")
+                    else:
+                        await self._fail_task(task, str(error))
+                    return
+                except asyncio.TimeoutError:
+                    await self._fail_task(task, "任务执行超时")
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    self.ctx.logger.exception("小花绘任务 #%s 执行失败", task.id)
+                    await self._fail_task(task, str(error))
+                    return
         finally:
             self._last_task_finished_at = time.monotonic()
 
@@ -850,14 +874,14 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         segments = []
         if settings is not None and self._reply_uses_at(settings.drawing, "completion_reply") and task.group_id:
             segments.append({"type": "at", "data": {"target_user_id": task.requester_id}})
-        segments.extend(
-            (
-                {"type": "text", "data": text},
-                {"type": "image", "content": base64.b64encode(image).decode("ascii")},
-            )
-        )
-        if not await self.ctx.send.hybrid(segments, stream_id):
-            raise ReplyDeliveryError("绘图结果发送失败")
+        segments.append({"type": "text", "data": text})
+        if len(segments) > 1:
+            if not await self.ctx.send.hybrid(segments, stream_id):
+                raise ReplyDeliveryError("绘图结果回复发送失败")
+        elif not await self.ctx.send.text(text, stream_id):
+            raise ReplyDeliveryError("绘图结果回复发送失败")
+        if not await self.ctx.send.image(base64.b64encode(image).decode("ascii"), stream_id):
+            raise ReplyDeliveryError("绘图结果图片发送失败")
 
     async def _refund_task(self, task: TaskRecord) -> None:
         if not task.quota_counted or task.quota_refunded:
@@ -1151,7 +1175,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             "output_available": bool(record.output_path and Path(record.output_path).is_file()),
             "reference_available": bool(record.reference_path and Path(record.reference_path).is_file()),
             "can_cancel": record.status == "queued",
-            "can_retry": record.status in {"failed", "cancelled", "succeeded"},
+            "can_retry": record.status in {"failed", "cancelled"},
         }
 
     @property
@@ -1272,61 +1296,39 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         await self._refund_task(task)
         return {"cancelled": True}
 
-    @API("webui_task_retry", description="手动重新提交一个历史任务，生成新任务 ID", version="1")
+    @API("webui_task_retry", description="把失败或取消的历史任务重新排队，保留原任务 ID", version="1")
     async def webui_task_retry(self, task_id: int) -> Dict[str, Any]:
         store = self._require_task_store()
         old = await asyncio.to_thread(store.get, task_id)
         if old is None:
             return {"retried": False, "error": "任务不存在"}
-        if old.status not in {"failed", "cancelled", "succeeded"}:
-            return {"retried": False, "error": "任务尚未结束"}
+        if old.status not in {"failed", "cancelled"}:
+            return {"retried": False, "error": "只有失败或取消的任务可以重试"}
+        if old.reference_path and not Path(old.reference_path).is_file():
+            return {"retried": False, "error": "原任务参考图已丢失"}
         guard = self._guard
         if guard is None:
             raise RuntimeError("绘图权限守卫尚未初始化")
         denied = await asyncio.to_thread(guard.check_quota, old.command_id, old.requester_id)
         if denied:
             return {"retried": False, "error": denied}
-        reference = b""
-        if old.reference_path:
-            try:
-                reference = await asyncio.to_thread(Path(old.reference_path).read_bytes)
-            except OSError:
-                return {"retried": False, "error": "原任务参考图已丢失"}
         settings = await asyncio.to_thread(self._require_settings_store().current)
-        try:
-            async with self._task_submit_lock:
-                task = await asyncio.to_thread(
-                    store.create_task,
-                    command_id=old.command_id,
-                    kind=old.kind,
-                    requester_id=old.requester_id,
-                    requester_group_name=old.requester_group_name,
-                    requester_qq_name=old.requester_qq_name,
-                    group_id=old.group_id,
-                    account_id=old.account_id,
-                    scope=old.scope,
-                    source_message_id=old.source_message_id,
-                    source_key=f"retry:{old.id}:{uuid.uuid4().hex}",
-                    role_names=old.role_names,
-                    extra_prompt=old.extra_prompt,
-                    final_prompt=old.final_prompt,
-                    reference_image=reference,
-                    api_model=old.api_model,
-                    api_size=old.api_size,
-                    max_waiting_tasks=settings.task_queue.max_waiting_tasks,
-                )
-                try:
-                    window = await asyncio.to_thread(guard.record_success, old.command_id, old.requester_id)
-                    if window:
-                        await asyncio.to_thread(store.set_quota, task.id, window)
-                except Exception:
-                    self.ctx.logger.exception("小花绘重试任务次数记录失败：任务 #%s", task.id)
-        except ActiveTaskError as error:
-            return {"retried": False, "error": str(error)}
-        except QueueFullError as error:
-            return {"retried": False, "error": str(error)}
-        except DuplicateTaskError as error:
-            return {"retried": False, "error": str(error)}
+        async with self._task_submit_lock:
+            current = await asyncio.to_thread(store.list_current, 1000)
+            if any(task.requester_id == old.requester_id for task in current):
+                return {"retried": False, "error": "该用户还有进行中的任务"}
+            if settings.task_queue.max_waiting_tasks > 0:
+                if await asyncio.to_thread(store.count_queued) >= settings.task_queue.max_waiting_tasks:
+                    return {"retried": False, "error": "队列已满，请稍后再试"}
+            task = await asyncio.to_thread(store.retry, old.id)
+            if task is None:
+                return {"retried": False, "error": "任务状态已变化，无法重试"}
+            try:
+                window = await asyncio.to_thread(guard.record_success, old.command_id, old.requester_id)
+                if window:
+                    await asyncio.to_thread(store.set_quota, task.id, window)
+            except Exception:
+                self.ctx.logger.exception("小花绘重试任务次数记录失败：任务 #%s", task.id)
         self._task_wakeup.set()
         return {"retried": True, "task_id": task.id}
 

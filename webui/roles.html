@@ -27,6 +27,8 @@
     .module-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
     .module-head h2 { margin-bottom: 4px; }
     .settings-card { margin: 0 0 16px; padding: 16px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); }
+    .settings-card h3 { margin: 0 0 6px; font-size: 15px; }
+    .settings-card hr { margin: 16px 0; border: 0; border-top: 1px solid var(--maibot-border); }
     .user-quota-list { display: grid; gap: 10px; }
     .user-quota-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--maibot-border); border-radius: var(--maibot-radius); background: var(--maibot-surface); flex-wrap: wrap; }
     .user-quota-main { display: grid; gap: 4px; min-width: 220px; }
@@ -196,14 +198,14 @@
   </header>
 
   <nav class="module-nav" aria-label="小花绘模块">
-    <button type="button" data-module="roles" class="active">角色库</button>
-    <button type="button" data-module="settings">插件设置</button>
+    <button type="button" data-module="settings" class="active">插件设置</button>
     <button type="button" data-module="replies">回复配置</button>
     <button type="button" data-module="users">用户管理</button>
+    <button type="button" data-module="roles">角色库</button>
     <button type="button" data-module="draw">当前任务</button>
     <button type="button" data-module="history">任务历史</button>
     <button type="button" data-module="api">绘图 API</button>
-    <button type="button" data-module="prompts">提示词模板</button>
+    <button type="button" data-module="migration">配置迁移</button>
   </nav>
 
   <section id="module-roles" class="module">
@@ -389,6 +391,30 @@
     <div id="user-quota-list" class="user-quota-list"></div>
   </section>
 
+  <section id="module-migration" class="module" hidden>
+    <div class="module-head">
+      <div>
+        <h2>配置迁移</h2>
+        <p class="muted">导出或导入文本配置，方便在新环境快速使用当前设置。不包含角色图片、任务图片、任务历史和绘图 API Token。</p>
+      </div>
+    </div>
+    <div class="settings-card">
+      <h3>导出当前配置</h3>
+      <p class="muted">包含触发模板、回复文案、基础提示词、权限、白名单和用户额外次数。</p>
+      <div class="actions">
+        <button id="config-export" class="maibot-button maibot-button-primary" type="button">导出配置 JSON</button>
+      </div>
+      <hr>
+      <h3>导入配置</h3>
+      <p class="muted">导入会覆盖当前文本配置；角色库、任务和图片不会被修改。</p>
+      <input id="config-import-file" type="file" accept=".json,application/json" hidden>
+      <div class="actions">
+        <button id="config-import" class="maibot-button" type="button">选择 JSON 导入</button>
+      </div>
+      <p id="config-migration-status" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
   <section id="module-replies" class="module" hidden>
     <div class="module-head">
       <div>
@@ -502,10 +528,7 @@
     </fieldset>
   </section>
 
-  <section id="module-prompts" class="module" hidden>
-    <div class="module-head"><div><h2>提示词模板</h2><p class="muted">管理绘图提示词模板和变量。</p></div></div>
-    <div class="placeholder">提示词模板模块正在开发中。</div>
-  </section>
+
 </main>
 
 <div id="modal" class="modal" hidden>
@@ -1374,6 +1397,68 @@
     }
   }
 
+  function setMigrationStatus(message, isError = false) {
+    const status = document.querySelector("#config-migration-status");
+    status.textContent = message || "";
+    status.className = isError ? "error" : "";
+  }
+
+  async function exportConfig() {
+    if (!settingsData) await loadSettings();
+    if (!settingsData) return;
+    const payload = {
+      format: "little-flower-draw-config",
+      version: 1,
+      exported_at: new Date().toISOString(),
+      settings: structuredClone(settingsData)
+    };
+    delete payload.settings.task_queue;
+    const text = JSON.stringify(payload, null, 2);
+    const blob = new Blob([text], {type: "application/json;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `little-flower-draw-config-${stamp}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setMigrationStatus("配置已导出；文件不包含图片和绘图 API Token。");
+  }
+
+  async function importConfig(file) {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setMigrationStatus("配置文件不能超过 2MB", true);
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch (_) {
+      setMigrationStatus("文件不是有效的 JSON", true);
+      return;
+    }
+    const data = parsed && parsed.settings ? parsed.settings : parsed;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      setMigrationStatus("配置文件里没有有效的设置对象", true);
+      return;
+    }
+    delete data.task_queue;
+    if (!await confirmAction("导入会覆盖当前文本配置，角色库、任务和图片不会被修改。继续吗？")) return;
+    try {
+      const result = await request("action", "save_settings", {settings_json: JSON.stringify(data)});
+      if (result && result.error) throw new Error(result.error);
+      settingsData = null;
+      settingsLoaded = false;
+      await loadSettings();
+      setMigrationStatus("配置已导入，新消息立即生效。");
+    } catch (error) {
+      setMigrationStatus(error.message || String(error), true);
+    }
+  }
+
   function fillSettings(settings) {
     document.querySelector("#setting-register-templates").value = settings.keywords.register_templates.join("\n");
     document.querySelector("#setting-view-templates").value = settings.keywords.view_templates.join("\n");
@@ -1680,6 +1765,7 @@
     for (const section of modules) section.hidden = section.id !== `module-${name}`;
     if (name === "settings") void loadSettings();
     if (name === "users") void loadSettings();
+    if (name === "migration") void loadSettings();
     if (name === "replies") void loadReplies();
     if (name === "api") void loadDrawingApi();
     if (name === "draw") void loadCurrentTasks();
@@ -2099,8 +2185,8 @@
       const rows = [
         ["状态", `${TASK_STATUS[task.status] || task.status}${task.stage ? `（${task.stage}）` : ""}`],
         ["发起人", `${requester}（${task.requester_id}）`],
-        ["群昵称", task.requester_group_name || "—"],
-        ["QQ 昵称", task.requester_qq_name || "—"],
+        ["群昵称", task.group_id ? (task.requester_group_name || "—") : "—（私聊）"],
+        ["QQ 昵称", task.requester_qq_name && task.requester_qq_name !== task.requester_id ? task.requester_qq_name : "—"],
         ["QQ 号", task.requester_id],
         ["类型", TASK_KIND[task.kind] || task.command_id],
         ["角色", (task.role_names || []).join("、") || "—"],
@@ -2150,7 +2236,7 @@
     try {
       const result = await request("action", "retry_task", {task_id: taskId});
       if (result.error) throw new Error(result.error);
-      setTaskStatus("#history-status", `已重新提交为任务 #${result.task_id}`);
+      setTaskStatus("#history-status", `任务 #${result.task_id} 已重新排队`);
       await loadTaskHistory(historyPage);
       await loadCurrentTasks();
     } catch (error) {
@@ -2202,7 +2288,7 @@
         // 单个任务失败不阻断其余选择。
       }
     }
-    setTaskStatus("#history-status", `已重新提交 ${succeeded} / ${ids.length} 个任务`);
+    setTaskStatus("#history-status", `已重新排队 ${succeeded} / ${ids.length} 个任务`);
     await loadTaskHistory(historyPage);
     await loadCurrentTasks();
   }
@@ -2213,6 +2299,15 @@
   document.querySelector("#settings-save").addEventListener("click", saveSettings);
   document.querySelector("#user-quota-save").addEventListener("click", () => void saveUserQuota());
   document.querySelector("#user-quota-reset").addEventListener("click", resetUserQuotaForm);
+  document.querySelector("#config-export").addEventListener("click", () => void exportConfig());
+  document.querySelector("#config-import").addEventListener("click", () => {
+    document.querySelector("#config-import-file").click();
+  });
+  document.querySelector("#config-import-file").addEventListener("change", event => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    void importConfig(file);
+  });
   document.querySelector("#replies-refresh").addEventListener("click", () => void loadReplies());
   document.querySelector("#replies-save").addEventListener("click", saveReplies);
   document.querySelector("#api-save").addEventListener("click", saveDrawingApi);
@@ -2280,7 +2375,7 @@
       for (const id of ["sort", "history-status-filter", "user-quota-command"]) {
         enhanceSelect(document.querySelector(`#${id}`));
       }
-      activateModule("roles");
+      activateModule("settings");
       await load(1);
     } catch (error) {
       setStatus(error.message || String(error), true);
