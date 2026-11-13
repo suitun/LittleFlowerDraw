@@ -23,7 +23,7 @@
 
 `plugin.py` 是入口，`_manifest.json` 是元信息，`create_plugin()` 返回插件实例。配置模型在插件源码中声明，`config.toml` 由 Runner 生成并保持忽略。模块增长后按职责拆分，不预建无用途的目录或抽象。
 
-角色库模块职责：`settings.py` 声明 `config.toml` 中的启用状态和配置版本，`webui_settings.py` 管理 WebUI 设置（角色库和绘图触发词、图片限制、绘图基础提示词、任务队列、权限、白名单，以及角色库/绘图任务/权限回复列表），`drawing_api.py` 管理 OpenAI 兼容图片接口配置与多图请求，`drawing_tasks.py` 管理任务 ID、持久队列、状态、历史与清理，`command_registry.py` 维护聊天指令注册表，`command_guard.py` 处理白名单/权限/配额与退次数，`command_usage.py` 持久化每人每指令次数和幂等退款，`trigger_syntax.py` 处理触发模板的可选 @ 前置语法，`role_patterns.py` 处理角色模板、回复列表校验与随机抽取，`drawing_patterns.py` 解析三类绘图触发词，`role_messages.py` 处理单张图片及引用，`help_image.py` 渲染指令帮助与角色绘图排行榜图片，`role_store.py` 负责单图事务持久化与列表/统计/删除/重命名，`role_webui.py` 负责缩略图、详情预览和数据组装，`webui.json` 与 `webui/roles.html` 声明并实现「小花绘」统一入口。主入口只负责 SDK 生命周期、消息分发、WebUI API 与回复。
+角色库模块职责：`settings.py` 声明 `config.toml` 中的启用状态和配置版本，`webui_settings.py` 管理 WebUI 设置（角色库和绘图触发词、图片限制、绘图基础提示词、任务队列、权限、白名单，以及角色库/绘图任务/权限回复列表），`drawing_api.py` 管理 OpenAI 兼容图片接口配置、多套 API 配置与多图请求，`drawing_tasks.py` 管理任务 ID、持久队列、状态、历史与清理，`command_registry.py` 维护聊天指令注册表，`command_guard.py` 处理白名单/权限/配额与退次数，`command_usage.py` 持久化每人每指令次数和幂等退款，`trigger_syntax.py` 处理触发模板的可选 @ 前置语法，`role_patterns.py` 处理角色模板、回复列表校验与随机抽取，`drawing_patterns.py` 解析三类绘图触发词，`role_messages.py` 处理单张图片及引用，`help_image.py` 渲染指令帮助与角色绘图排行榜图片，`role_store.py` 负责单图事务持久化与列表/统计/删除/重命名，`role_webui.py` 负责缩略图、详情预览和数据组装，`webui.json` 与 `webui/roles.html` 声明并实现「小花绘」统一入口。主入口只负责 SDK 生命周期、消息分发、WebUI API 与回复。
 
 ## 文档和示例阅读顺序
 
@@ -72,7 +72,7 @@
 - 使用真实 `stream_id` 发送消息，不自行计算会话 ID；回复路由按发起聊天隔离，但角色数据全局共享。
 - 检查发送与能力调用的返回结果，向用户给出可读错误，并记录便于排查的日志，不把失败伪装成成功。
 - 网络请求设置超时并处理失败。绘图、批量文件操作和其他耗时同步工作不得阻塞事件循环；后台任务、连接和句柄在卸载时清理。
-- 持久数据放在 `self.ctx.paths.data_dir`，临时图片与缓存放在 `runtime_dir`；固定素材放在 `assets/`。角色名、创建者、唯一图片和时间戳存在 `roles.sqlite3`，同名覆盖在同一事务内完成，失败不能破坏旧图。旧版多图库在初始化时迁移为第一张图片。次数窗口存在 `command_usage.sqlite3`，WebUI 设置存在 `webui_settings.json`，绘图 API 配置存在 `drawing_api.json`，任务队列与历史存在 `drawing_tasks.sqlite3`（记录发起人的 QQ 号、群昵称和 QQ 昵称），任务参考图存在 `drawing_tasks/任务ID/`；生成图片按日期保存到 `data_dir/drawings/`，该目录已忽略。当前任务和历史任务卡片直接展示参考图或成品图，详情使用大图弹窗。绘图接口 HTTP 400 代表图片不合规，使用独立短回复，不展示上游长错误；HTTP 502 自动重试最多 2 次，中间不回复发起人，全部失败后才提示一次。
+- 持久数据放在 `self.ctx.paths.data_dir`，临时图片与缓存放在 `runtime_dir`；固定素材放在 `assets/`。角色名、创建者、唯一图片和时间戳存在 `roles.sqlite3`，同名覆盖在同一事务内完成，失败不能破坏旧图。旧版多图库在初始化时迁移为第一张图片。次数窗口存在 `command_usage.sqlite3`，WebUI 设置存在 `webui_settings.json`，绘图 API 配置存在 `drawing_api.json`，任务队列与历史存在 `drawing_tasks.sqlite3`（记录发起人的 QQ 号、群昵称和 QQ 昵称），任务参考图存在 `drawing_tasks/任务ID/`；生成图片按日期保存到 `data_dir/drawings/`，该目录已忽略；配置迁移快照保存到 `data_dir/exports/`，只含文本配置。当前任务和历史任务卡片直接展示参考图或成品图，详情使用大图弹窗。绘图接口 HTTP 400 代表图片不合规，使用独立短回复，不展示上游长错误；HTTP 502 自动重试最多 2 次，中间不回复发起人，全部失败后才提示一次。
 - 单张图片需校验格式和字节限制；保存实际收到的图片，不承诺绕过主程序图片压缩。绘图 API 优先原格式上传，总请求超过约 18MB 时才按比例压缩。角色名只作为数据库键，不作为文件路径。队列和后台任务必须有界，并在卸载时清理。
 - 使用受控文件名并检查输出路径边界，不将用户输入直接当路径。不硬编码密钥、个人 QQ 号、群号或机器绝对路径。
 - 不提交本地配置、日志、数据库、临时脚本、虚拟环境或凭据；保留当前自用许可，未经用户要求不变更许可。

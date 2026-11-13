@@ -44,6 +44,7 @@ _ROW_COLUMNS = (
     "finished_at",
     "requester_group_name",
     "requester_qq_name",
+    "api_profile_id",
 )
 _SELECT_TASK_SQL = f"SELECT {', '.join(_ROW_COLUMNS)} FROM drawing_tasks"
 _CREATE_SCHEMA_SQL = """
@@ -81,7 +82,8 @@ CREATE TABLE IF NOT EXISTS drawing_tasks (
     started_at INTEGER NOT NULL DEFAULT 0,
     finished_at INTEGER NOT NULL DEFAULT 0,
     requester_group_name TEXT NOT NULL DEFAULT '',
-    requester_qq_name TEXT NOT NULL DEFAULT ''
+    requester_qq_name TEXT NOT NULL DEFAULT '',
+    api_profile_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_task_per_user
@@ -95,8 +97,9 @@ _INSERT_TASK_SQL = """
 INSERT INTO drawing_tasks (
     id, status, stage, command_id, kind, requester_id, group_id, account_id, scope,
     source_message_id, source_key, role_names_json, extra_prompt, final_prompt,
-    reference_path, api_model, api_size, created_at, requester_group_name, requester_qq_name
-) VALUES (?, 'queued', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    reference_path, api_model, api_size, created_at, requester_group_name, requester_qq_name,
+    api_profile_id
+) VALUES (?, 'queued', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -132,6 +135,7 @@ class TaskRecord:
     finished_at: int
     requester_group_name: str = ""
     requester_qq_name: str = ""
+    api_profile_id: str = ""
 
 
 class TaskStoreError(RuntimeError):
@@ -189,6 +193,7 @@ def _row_to_record(row: Sequence[object]) -> TaskRecord:
         finished_at=int(row[25]),
         requester_group_name=str(row[26]),
         requester_qq_name=str(row[27]),
+        api_profile_id=str(row[28]),
     )
 
 
@@ -204,7 +209,7 @@ class DrawingTaskStore:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(_CREATE_SCHEMA_SQL)
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(drawing_tasks)")}
-            for column in ("requester_group_name", "requester_qq_name"):
+            for column in ("requester_group_name", "requester_qq_name", "api_profile_id"):
                 if column not in columns:
                     connection.execute(
                         f"ALTER TABLE drawing_tasks ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
@@ -270,6 +275,7 @@ class DrawingTaskStore:
         reference_image: bytes,
         api_model: str,
         api_size: str,
+        api_profile_id: str = "",
         max_waiting_tasks: int = 0,
     ) -> TaskRecord:
         """查重、并发检查、配额容量、ID 分配、参考图写入与入库在同一事务内完成。"""
@@ -334,6 +340,7 @@ class DrawingTaskStore:
                         now,
                         requester_group_name.strip(),
                         requester_qq_name.strip(),
+                        api_profile_id,
                     ),
                 )
                 connection.commit()
@@ -372,6 +379,7 @@ class DrawingTaskStore:
             finished_at=0,
             requester_group_name=requester_group_name.strip(),
             requester_qq_name=requester_qq_name.strip(),
+            api_profile_id=api_profile_id,
         )
 
     def set_quota(self, task_id: int, window_start: int) -> None:
@@ -464,14 +472,35 @@ class DrawingTaskStore:
                 "UPDATE drawing_tasks SET attempts = attempts + 1 WHERE id = ?", (task_id,)
             )
 
-    def retry(self, task_id: int) -> Optional[TaskRecord]:
-        """把失败或取消的任务重新放回队列，保留原任务 ID。"""
+    def retry(
+        self,
+        task_id: int,
+        api_profile_id: Optional[str] = None,
+        api_model: Optional[str] = None,
+        api_size: Optional[str] = None,
+    ) -> Optional[TaskRecord]:
+        """把失败或取消的任务重新放回队列，保留原任务 ID；可切换 API 快照。"""
+        assignments = [
+            "status = 'queued'",
+            "stage = ''",
+            "error = ''",
+            "output_path = ''",
+            "started_at = 0",
+            "finished_at = 0",
+            "quota_counted = 0",
+            "quota_window_start = 0",
+            "quota_refunded = 0",
+        ]
+        parameters: List[object] = []
+        if api_profile_id is not None:
+            assignments.extend(("api_profile_id = ?", "api_model = ?", "api_size = ?"))
+            parameters.extend((api_profile_id, api_model or "", api_size or ""))
+        parameters.append(task_id)
         with self._connection() as connection, connection:
             cursor = connection.execute(
-                "UPDATE drawing_tasks SET status = 'queued', stage = '', error = '', output_path = '', "
-                "started_at = 0, finished_at = 0, quota_counted = 0, quota_window_start = 0, quota_refunded = 0 "
+                f"UPDATE drawing_tasks SET {', '.join(assignments)} "
                 "WHERE id = ? AND status IN ('failed', 'cancelled')",
-                (task_id,),
+                parameters,
             )
             if cursor.rowcount == 0:
                 return None

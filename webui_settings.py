@@ -450,6 +450,7 @@ class UserQuota(PluginConfigBase):
     user_id: str = Field(..., min_length=5, max_length=20, pattern=r"^\d{5,20}$", description="QQ 号")
     command: str = Field(..., min_length=1, max_length=64, description="指令名称")
     extra_count: int = Field(default=1, ge=1, le=100000, description="在原有次数上额外增加的次数")
+    note: str = Field(default="", max_length=200, description="备注，仅用于说明")
 
     @field_validator("command")
     @classmethod

@@ -724,16 +724,28 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         settings = self.plugin._settings_store.current()
         settings.task_queue.task_interval_seconds = 0
         self.plugin._settings_store.save(settings)
+        self.plugin._drawing_api_store.save_profile(
+            PLUGIN_MODULE.DrawingApiConfig(
+                profile_id="backup",
+                name="备用",
+                base_url="https://backup.test/v1",
+                api_key="backup-key",
+                model="gpt-image-2.5",
+                size="auto",
+            )
+        )
 
         with patch.object(
             PLUGIN_MODULE.OpenAIImageClient,
             "generate",
             return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
         ), patch.object(PLUGIN_MODULE.LittleFlowerDrawPlugin, "_save_drawing_image", return_value=output):
-            retried = await self.plugin.webui_task_retry(first.id)
+            retried = await self.plugin.webui_task_retry(first.id, "backup")
             self.assertTrue(retried["retried"])
             self.assertEqual(retried["task_id"], first.id)
-            await self.wait_task(first.id)
+            finished = await self.wait_task(first.id)
+            self.assertEqual(finished.api_profile_id, "backup")
+            self.assertEqual(finished.api_model, "gpt-image-2.5")
 
         self.assertEqual((await self.plugin.webui_task_history())["total"], 1)
         self.assertFalse((await self.plugin.webui_task_detail(first.id))["can_retry"])
@@ -792,6 +804,45 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         invalid = await self.plugin.webui_drawing_api_save(json.dumps({"base_url": "ftp://bad"}, ensure_ascii=False))
         self.assertFalse(invalid["saved"])
         self.assertIn("http", invalid["error"])
+
+    async def test_webui_drawing_api_profiles_can_be_added_activated_and_deleted(self) -> None:
+        await self.plugin.webui_drawing_api_save(
+            json.dumps(
+                {
+                    "profile_id": "main",
+                    "name": "主力",
+                    "base_url": "https://main.test/v1",
+                    "api_key": "main-key",
+                    "model": "gpt-image-2",
+                    "size": "auto",
+                    "timeout_seconds": 180,
+                },
+                ensure_ascii=False,
+            )
+        )
+        saved = await self.plugin.webui_drawing_api_save_profile(
+            json.dumps(
+                {
+                    "profile_id": "backup",
+                    "name": "备用",
+                    "base_url": "https://backup.test/v1",
+                    "api_key": "backup-key",
+                    "model": "gpt-image-2.5",
+                    "size": "reference",
+                    "timeout_seconds": 240,
+                },
+                ensure_ascii=False,
+            )
+        )
+        self.assertTrue(saved["saved"])
+        loaded = await self.plugin.webui_drawing_api()
+        self.assertEqual(len(loaded["profiles"]), 3)
+        activated = await self.plugin.webui_drawing_api_activate("backup")
+        self.assertTrue(activated["activated"])
+        self.assertEqual((await self.plugin.webui_drawing_api())["model"], "gpt-image-2.5")
+        deleted = await self.plugin.webui_drawing_api_delete("backup")
+        self.assertTrue(deleted["deleted"])
+        self.assertEqual(len((await self.plugin.webui_drawing_api())["profiles"]), 2)
 
     def test_drawing_image_is_saved_under_configured_data_directory(self) -> None:
         with TemporaryDirectory() as directory:
@@ -922,6 +973,16 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded["commands"]["policies"][0]["permission"], "仅管理员")
         self.assertEqual(loaded["library"]["max_image_mb"], 12)
         self.assertTrue(self.plugin._settings_store.path.is_file())
+
+    async def test_config_export_writes_text_only_snapshot(self) -> None:
+        exported = await self.plugin.webui_config_export()
+        path = Path(exported["path"])
+        self.assertTrue(path.is_file())
+        data = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(data["format"], "little-flower-draw-config")
+        self.assertNotIn("task_queue", data["settings"])
+        self.assertNotIn("drawing_api", data["settings"])
+        self.assertEqual(json.loads(exported["json"]), data)
 
     async def test_webui_settings_save_preserves_and_updates_user_quotas(self) -> None:
         settings = await self.plugin.webui_settings()

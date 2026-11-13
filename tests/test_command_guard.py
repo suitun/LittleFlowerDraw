@@ -104,6 +104,36 @@ class CommandGuardTests(unittest.TestCase):
         with patch("command_usage.time.time", return_value=next_day):
             self.assertIsNone(self.guard.check_quota("登记角色", "20001"))
 
+    def test_four_drawing_commands_share_one_quota_pool(self) -> None:
+        settings = webui_settings.WebUISettings()
+        for policy in settings.commands.policies:
+            if policy.command in {"自由绘画", "单角色替换", "双角色替换", "多人替换"}:
+                policy.limit = 1
+                policy.reset_days = 1
+        self.settings_store.save(settings)
+
+        for command_id in ("单角色替换", "双角色替换", "多人替换", "自由绘画"):
+            self.assertIsNone(self.guard.check_quota(command_id, "20001"))
+            self.guard.record_success(command_id, "20001")
+        denied = self.guard.check_quota("单角色替换", "20001")
+        self.assertIsNotNone(denied)
+        self.assertIn("画画", denied)
+        self.assertEqual(self.guard.remaining_quota("自由绘画", "20001"), 0)
+
+    def test_drawing_zero_limits_contribute_zero_not_unlimited(self) -> None:
+        settings = webui_settings.WebUISettings()
+        limits = {"自由绘画": 3, "单角色替换": 10, "双角色替换": 0, "多人替换": 0}
+        for policy in settings.commands.policies:
+            if policy.command in limits:
+                policy.limit = limits[policy.command]
+        self.settings_store.save(settings)
+
+        self.assertEqual(self.guard.quota_limit(settings, "自由绘画", "20001"), 13)
+        self.assertEqual(self.guard.remaining_quota("双角色替换", "20001"), 13)
+        self.assertIsNone(self.guard.check_quota("单角色替换", "20001"))
+        self.guard.record_success("单角色替换", "20001")
+        self.assertEqual(self.guard.remaining_quota("多人替换", "20001"), 12)
+
     def test_user_extra_quota_is_added_to_command_limit(self) -> None:
         settings = self.settings()
         settings.user_quotas = [

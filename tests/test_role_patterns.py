@@ -84,6 +84,12 @@ class RolePatternTests(unittest.TestCase):
         )
         self.assertEqual((request.action, request.role_name), ("ranking", ""))
 
+    def test_task_submission_reply_supports_remaining_count(self):
+        self.assertEqual(patterns.render_task_reply("剩余 {剩余次数}", 3, 1, 5), "剩余 5")
+        self.assertEqual(patterns.render_task_reply("剩余 {剩余次数}", 3, 1, 1000), "剩余 1000")
+        self.assertEqual(patterns.render_task_reply("剩余 {剩余次数}", 3, 1, 1001), "剩余 不限")
+        self.assertEqual(patterns.render_task_reply("剩余 {剩余次数}", 3, 1, -1), "剩余 不限")
+
     def test_help_command_matches_configured_keyword(self):
         request = patterns.match_request(
             "小花绘帮助", ["小花小花这是 {角色名}"], [], ["小花记得谁"], ["小花绘帮助"]

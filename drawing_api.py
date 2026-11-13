@@ -30,6 +30,8 @@ class DrawingApiError(RuntimeError):
 
 
 class DrawingApiConfig(PluginConfigBase):
+    profile_id: str = Field(default="default", max_length=64, description="API 配置标识")
+    name: str = Field(default="默认 API", max_length=80, description="API 配置名称")
     base_url: str = Field(default="", max_length=2000, description="中转站地址，可填到 /v1 或完整 /v1/images/edits")
     api_key: str = Field(default="", max_length=4000, description="API Token，使用 Bearer 认证")
     model: str = Field(default="gpt-image-1", max_length=200, description="OpenAI 图片模型")
@@ -39,6 +41,22 @@ class DrawingApiConfig(PluginConfigBase):
         description="生成尺寸：auto、reference，或 1024x1024 这类固定尺寸",
     )
     timeout_seconds: int = Field(default=180, ge=30, le=600, description="单次 API 请求超时秒数")
+
+    @field_validator("profile_id")
+    @classmethod
+    def validate_profile_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+            raise ValueError("API 配置标识只能包含字母、数字、下划线和短横线")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("API 配置名称不能为空")
+        return value
 
     @field_validator("base_url")
     @classmethod
@@ -102,40 +120,114 @@ class DrawingApiConfig(PluginConfigBase):
 
 
 class DrawingApiStore:
-    """API 配置独立保存，避免和普通插件设置一起被覆盖。"""
+    """多套 API 配置独立保存；每套配置有自己的模型标识。"""
+
+    _VERSION = 2
 
     def __init__(self, data_dir: Path) -> None:
         self.path = data_dir / "drawing_api.json"
         self._lock = threading.Lock()
-        self._config: Optional[DrawingApiConfig] = None
+        self._profiles: Dict[str, DrawingApiConfig] = {}
+        self._active_id = ""
 
     def load(self) -> DrawingApiConfig:
         with self._lock:
+            changed = False
             if self.path.is_file():
-                config = DrawingApiConfig.model_validate(json.loads(self.path.read_text(encoding="utf-8")))
+                raw = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict) and isinstance(raw.get("profiles"), list):
+                    profiles = [DrawingApiConfig.model_validate(item) for item in raw["profiles"]]
+                    active_id = str(raw.get("active_id") or "").strip()
+                else:
+                    legacy = DrawingApiConfig.model_validate(raw)
+                    profiles = [legacy]
+                    active_id = legacy.profile_id
+                    changed = True
             else:
-                config = DrawingApiConfig()
-                self._write(config)
-            self._config = config
-            return config.model_copy(deep=True)
+                profiles = [DrawingApiConfig()]
+                active_id = "default"
+                changed = True
+            if not profiles:
+                profiles = [DrawingApiConfig()]
+                changed = True
+            self._profiles = {}
+            for profile in profiles:
+                if profile.profile_id in self._profiles:
+                    raise ValueError(f"API 配置标识重复: {profile.profile_id}")
+                self._profiles[profile.profile_id] = profile
+            if active_id not in self._profiles:
+                active_id = next(iter(self._profiles))
+                changed = True
+            self._active_id = active_id
+            if changed:
+                self._write()
+            return self._profiles[self._active_id].model_copy(deep=True)
 
     def save(self, config: DrawingApiConfig) -> DrawingApiConfig:
+        """兼容旧版单配置保存：保存后同时设为当前配置。"""
         with self._lock:
-            self._write(config)
-            self._config = config
+            self._profiles[config.profile_id] = config
+            self._active_id = config.profile_id
+            self._write()
+            return config.model_copy(deep=True)
+
+    def save_profile(self, config: DrawingApiConfig) -> DrawingApiConfig:
+        """新增或更新一套配置，不改变当前选择。"""
+        with self._lock:
+            self._profiles[config.profile_id] = config
+            if not self._active_id:
+                self._active_id = config.profile_id
+            self._write()
             return config.model_copy(deep=True)
 
     def current(self) -> DrawingApiConfig:
         with self._lock:
-            if self._config is None:
+            if self._active_id not in self._profiles:
                 raise RuntimeError("绘图 API 配置尚未加载")
-            return self._config.model_copy(deep=True)
+            return self._profiles[self._active_id].model_copy(deep=True)
 
-    def _write(self, config: DrawingApiConfig) -> None:
+    def active_id(self) -> str:
+        with self._lock:
+            return self._active_id
+
+    def list_profiles(self) -> List[DrawingApiConfig]:
+        with self._lock:
+            return [profile.model_copy(deep=True) for profile in self._profiles.values()]
+
+    def get(self, profile_id: str) -> Optional[DrawingApiConfig]:
+        with self._lock:
+            profile = self._profiles.get(profile_id)
+            return profile.model_copy(deep=True) if profile is not None else None
+
+    def set_active(self, profile_id: str) -> DrawingApiConfig:
+        with self._lock:
+            if profile_id not in self._profiles:
+                raise ValueError("API 配置不存在")
+            self._active_id = profile_id
+            self._write()
+            return self._profiles[profile_id].model_copy(deep=True)
+
+    def delete_profile(self, profile_id: str) -> None:
+        with self._lock:
+            if profile_id not in self._profiles:
+                raise ValueError("API 配置不存在")
+            if len(self._profiles) <= 1:
+                raise ValueError("至少保留一套 API 配置")
+            del self._profiles[profile_id]
+            if self._active_id == profile_id:
+                self._active_id = next(iter(self._profiles))
+            self._write()
+
+    def _write(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": self._VERSION,
+            "active_id": self._active_id,
+            "profiles": [profile.model_dump(mode="json") for profile in self._profiles.values()],
+        }
         temporary = self.path.with_name(self.path.name + f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(
-            json.dumps(config.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         os.replace(temporary, self.path)

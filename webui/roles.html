@@ -350,7 +350,7 @@
 
       <fieldset class="settings-card">
         <legend>指令权限</legend>
-        <p class="muted">每人每指令跨群统计；0 表示不限次数，重置间隔按天，在到期日 0 点重置。</p>
+        <p class="muted">每人每指令跨群统计；0 表示不限次数，重置间隔按天，在到期日 0 点重置。四种绘图指令（自由绘画、单角色替换、双角色替换、多人替换）的次数会合计成一个共享的「画画」次数池，各自的配置仍可单独修改；四种都为 0 时共享池才不限次数，单个 0 只贡献 0 次。</p>
         <div id="policy-list" class="policy-list"></div>
       </fieldset>
 
@@ -378,6 +378,9 @@
         </label>
         <label class="settings-field">额外次数
           <input id="user-quota-extra" class="maibot-input" type="number" min="1" max="100000" value="1">
+        </label>
+        <label class="settings-field">备注（可选）
+          <input id="user-quota-note" class="maibot-input" type="text" maxlength="200" placeholder="例如：朋友、活动临时额度">
         </label>
       </div>
       <div class="settings-footer">
@@ -408,8 +411,10 @@
       <h3>导入配置</h3>
       <p class="muted">导入会覆盖当前文本配置；角色库、任务和图片不会被修改。</p>
       <input id="config-import-file" type="file" accept=".json,application/json" hidden>
+      <textarea id="config-import-text" class="maibot-input" rows="5" placeholder="也可以直接粘贴导出的配置 JSON" style="width:100%;margin-top:10px"></textarea>
       <div class="actions">
         <button id="config-import" class="maibot-button" type="button">选择 JSON 导入</button>
+        <button id="config-import-text-button" class="maibot-button" type="button">从粘贴内容导入</button>
       </div>
       <p id="config-migration-status" role="status" aria-live="polite"></p>
     </div>
@@ -492,12 +497,26 @@
     </div>
     <fieldset class="settings-card">
       <legend>OpenAI 图片接口</legend>
+      <div class="settings-grid">
+        <label class="settings-field">配置名称
+          <input id="api-name" class="maibot-input" type="text" placeholder="例如：主力中转站" maxlength="80">
+        </label>
+        <label class="settings-field">选择 API（编辑）
+          <select id="api-profile-select" class="maibot-select" aria-label="选择绘图 API 配置"></select>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="api-new" class="maibot-button" type="button">新增 API</button>
+        <button id="api-activate" class="maibot-button" type="button">切换使用</button>
+        <button id="api-delete" class="maibot-button task-delete" type="button">删除配置</button>
+      </div>
+      <p id="api-active-name" class="muted"></p>
       <label class="settings-field">API URL
         <input id="api-url" class="maibot-input" type="url" placeholder="https://中转站地址/v1" autocomplete="off">
       </label>
       <p class="muted">可以填到 <code>/v1</code>，也可以直接填完整的 <code>/v1/images/edits</code>。</p>
       <label class="settings-field">API Token
-        <input id="api-token" class="maibot-input" type="password" placeholder="sk-..." autocomplete="off">
+        <input id="api-token" class="maibot-input" type="text" placeholder="sk-..." autocomplete="off">
       </label>
       <div class="settings-grid">
         <label class="settings-field">模型
@@ -523,7 +542,7 @@
       <p id="api-endpoint" class="muted"></p>
       <div class="settings-footer">
         <p id="api-status" role="status" aria-live="polite"></p>
-        <button id="api-save" class="maibot-button maibot-button-primary" type="button">保存 API 配置</button>
+        <button id="api-save" class="maibot-button maibot-button-primary" type="button">保存配置</button>
       </div>
     </fieldset>
   </section>
@@ -580,12 +599,16 @@
   let userQuotaEditIndex = -1;
   let apiLoaded = false;
   let apiModels = [];
+  let apiProfiles = [];
+  let apiActiveId = "";
+  let apiSelectedId = "";
   let currentTasksLoading = false;
   let currentTasksPage = 1;
   let currentTasksPages = 1;
   let currentTasksData = [];
   const CURRENT_PAGE_SIZE = 12;
   let confirmResolver = null;
+  let retryApiResolver = null;
   let historyPage = 1;
   let historyPages = 1;
   let historySearchTimer = 0;
@@ -852,6 +875,11 @@
       const resolve = confirmResolver;
       confirmResolver = null;
       resolve(false);
+    }
+    if (retryApiResolver) {
+      const resolve = retryApiResolver;
+      retryApiResolver = null;
+      resolve(null);
     }
     modalBody.replaceChildren();
     state.selected = null;
@@ -1273,6 +1301,7 @@
     userQuotaEditIndex = -1;
     document.querySelector("#user-quota-qq").value = "";
     document.querySelector("#user-quota-extra").value = "1";
+    document.querySelector("#user-quota-note").value = "";
     document.querySelector("#user-quota-save").textContent = "添加额度";
     setUserQuotaStatus("");
   }
@@ -1312,6 +1341,7 @@
           ? `${quota.command}：基础 ${base} 次 + 额外 ${quota.extra_count} 次 = ${base + quota.extra_count} 次`
           : `${quota.command}：当前不限次数，额外配置暂不生效`
       ));
+      if (quota.note) main.append(make("div", "user-quota-detail", `备注：${quota.note}`));
       row.append(main);
       const actions = make("div", "actions");
       const edit = make("button", "maibot-button", "编辑");
@@ -1323,6 +1353,7 @@
         document.querySelector("#user-quota-qq").value = quota.user_id;
         document.querySelector("#user-quota-command").value = quota.command;
         document.querySelector("#user-quota-extra").value = String(quota.extra_count);
+        document.querySelector("#user-quota-note").value = quota.note || "";
         document.querySelector("#user-quota-save").textContent = "保存修改";
         setUserQuotaStatus(`正在编辑 QQ ${quota.user_id} 的「${quota.command}」`);
       });
@@ -1357,11 +1388,12 @@
       return;
     }
     if (!settingsData) await loadSettings();
+    const note = document.querySelector("#user-quota-note").value.trim();
     const quotas = (settingsData.user_quotas || []).map(item => ({...item}));
     if (userQuotaEditIndex >= 0) {
-      quotas[userQuotaEditIndex] = {user_id: qq, command, extra_count: extra};
+      quotas[userQuotaEditIndex] = {user_id: qq, command, extra_count: extra, note};
     } else {
-      quotas.push({user_id: qq, command, extra_count: extra});
+      quotas.push({user_id: qq, command, extra_count: extra, note});
     }
     const seen = new Set();
     for (const quota of quotas) {
@@ -1406,25 +1438,59 @@
   async function exportConfig() {
     if (!settingsData) await loadSettings();
     if (!settingsData) return;
-    const payload = {
-      format: "little-flower-draw-config",
-      version: 1,
-      exported_at: new Date().toISOString(),
-      settings: structuredClone(settingsData)
-    };
-    delete payload.settings.task_queue;
-    const text = JSON.stringify(payload, null, 2);
-    const blob = new Blob([text], {type: "application/json;charset=utf-8"});
-    const url = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `little-flower-draw-config-${stamp}.json`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setMigrationStatus("配置已导出；文件不包含图片和绘图 API Token。");
+    try {
+      const result = await request("query", "config_export");
+      if (result.error) throw new Error(result.error);
+      const body = make("div", "config-export-body");
+      body.append(make("p", "muted", "WebUI 沙箱不允许直接下载文件，配置已保存到服务器："));
+      const path = make("code", "config-export-path", result.path);
+      body.append(path);
+      const textarea = make("textarea", "maibot-input config-export-text");
+      textarea.value = result.json;
+      textarea.readOnly = true;
+      textarea.rows = 10;
+      textarea.style.width = "100%";
+      textarea.style.marginTop = "10px";
+      body.append(textarea);
+      const actions = make("div", "task-actions");
+      const copy = make("button", "maibot-button maibot-button-primary", "复制配置");
+      copy.type = "button";
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(result.json);
+          setMigrationStatus("配置已复制到剪贴板");
+        } catch (_) {
+          textarea.select();
+          document.execCommand("copy");
+          setMigrationStatus("配置已选中并复制");
+        }
+      });
+      actions.append(copy);
+      body.append(actions);
+      openModal("导出配置", body);
+      setMigrationStatus(`配置已保存：${result.path}`);
+    } catch (error) {
+      setMigrationStatus(error.message || String(error), true);
+    }
+  }
+
+  async function applyImportedConfig(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      setMigrationStatus("配置里没有有效的设置对象", true);
+      return;
+    }
+    delete data.task_queue;
+    if (!await confirmAction("导入会覆盖当前文本配置，角色库、任务和图片不会被修改。继续吗？")) return;
+    try {
+      const result = await request("action", "save_settings", {settings_json: JSON.stringify(data)});
+      if (result && result.error) throw new Error(result.error);
+      settingsData = null;
+      settingsLoaded = false;
+      await loadSettings();
+      setMigrationStatus("配置已导入，新消息立即生效。");
+    } catch (error) {
+      setMigrationStatus(error.message || String(error), true);
+    }
   }
 
   async function importConfig(file) {
@@ -1440,23 +1506,24 @@
       setMigrationStatus("文件不是有效的 JSON", true);
       return;
     }
-    const data = parsed && parsed.settings ? parsed.settings : parsed;
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
-      setMigrationStatus("配置文件里没有有效的设置对象", true);
+    await applyImportedConfig(parsed && parsed.settings ? parsed.settings : parsed);
+  }
+
+  async function importConfigText() {
+    const raw = document.querySelector("#config-import-text").value.trim();
+    if (!raw) {
+      setMigrationStatus("先粘贴配置 JSON", true);
       return;
     }
-    delete data.task_queue;
-    if (!await confirmAction("导入会覆盖当前文本配置，角色库、任务和图片不会被修改。继续吗？")) return;
+    let parsed;
     try {
-      const result = await request("action", "save_settings", {settings_json: JSON.stringify(data)});
-      if (result && result.error) throw new Error(result.error);
-      settingsData = null;
-      settingsLoaded = false;
-      await loadSettings();
-      setMigrationStatus("配置已导入，新消息立即生效。");
-    } catch (error) {
-      setMigrationStatus(error.message || String(error), true);
+      parsed = JSON.parse(raw);
+    } catch (_) {
+      setMigrationStatus("粘贴内容不是有效的 JSON", true);
+      return;
     }
+    await applyImportedConfig(parsed && parsed.settings ? parsed.settings : parsed);
+    document.querySelector("#config-import-text").value = "";
   }
 
   function fillSettings(settings) {
@@ -1610,7 +1677,7 @@
       description: "任务提交、排队、失败和完成时的回复。",
       source: "drawing",
       fields: [
-        ["submitted_reply", "提交成功", "支持 {任务ID}、{排队数}"],
+        ["submitted_reply", "提交成功", "支持 {任务ID}、{排队数}、{剩余次数}"],
         ["active_task_reply", "已有进行中任务", "支持 {任务ID}"],
         ["queue_full_reply", "队列已满", "不需要占位符"],
         ["duplicate_task_reply", "重复提交", "不需要占位符"],
@@ -1621,7 +1688,7 @@
         ["api_error_reply", "API 调用失败", "支持 {错误}"],
         ["task_failed_reply", "任务失败", "支持 {任务ID}、{错误}"],
         ["image_rejected_reply", "图片不合规（400）", "支持 {任务ID}，接口返回 400 时使用"],
-        ["completion_reply", "任务完成", "支持 {任务ID}"]
+        ["completion_reply", "任务完成", "支持 {任务ID}、{剩余次数}"]
       ]
     },
     {
@@ -1778,6 +1845,36 @@
     status.className = isError ? "error" : "";
   }
 
+  function fillDrawingApiForm(config) {
+    document.querySelector("#api-name").value = config.name || "默认 API";
+    document.querySelector("#api-url").value = config.base_url || "";
+    document.querySelector("#api-token").value = config.api_key || "";
+    document.querySelector("#api-model").value = config.model || "";
+    document.querySelector("#api-size").value = config.size || "auto";
+    document.querySelector("#api-timeout").value = String(config.timeout_seconds || 180);
+    document.querySelector("#api-endpoint").textContent = config.endpoint ? `实际请求：${config.endpoint}` : "";
+  }
+
+  function renderApiProfiles() {
+    const select = document.querySelector("#api-profile-select");
+    select.replaceChildren();
+    for (const profile of apiProfiles) {
+      const option = make("option", "", `${profile.name || "未命名 API"} — ${profile.model || "未设置模型"}${profile.profile_id === apiActiveId ? "（当前）" : ""}`);
+      option.value = profile.profile_id;
+      select.append(option);
+    }
+    if (apiSelectedId) select.value = apiSelectedId;
+    enhanceSelect(select);
+    const selected = apiProfiles.find(profile => profile.profile_id === apiSelectedId);
+    if (selected) {
+      fillDrawingApiForm(selected);
+    }
+    const active = apiProfiles.find(profile => profile.profile_id === apiActiveId);
+    document.querySelector("#api-active-name").textContent = active
+      ? `当前任务使用：${active.name} — ${active.model || "未设置模型"}`
+      : "当前没有可用的 API 配置";
+  }
+
   async function loadDrawingApi() {
     if (apiLoaded) return;
     setApiStatus("正在加载 API 配置…");
@@ -1786,12 +1883,12 @@
       apiModels = [];
       closeModelMenu();
       closeSizeMenu();
-      document.querySelector("#api-url").value = config.base_url;
-      document.querySelector("#api-token").value = config.api_key;
-      document.querySelector("#api-model").value = config.model;
-      document.querySelector("#api-size").value = config.size;
-      document.querySelector("#api-timeout").value = String(config.timeout_seconds);
-      document.querySelector("#api-endpoint").textContent = config.endpoint ? `实际请求：${config.endpoint}` : "";
+      apiProfiles = Array.isArray(config.profiles) && config.profiles.length ? config.profiles : [config];
+      apiActiveId = config.active_id || config.profile_id || apiProfiles[0].profile_id;
+      if (!apiSelectedId || !apiProfiles.some(profile => profile.profile_id === apiSelectedId)) {
+        apiSelectedId = apiActiveId;
+      }
+      renderApiProfiles();
       apiLoaded = true;
       setApiStatus(config.configured ? "" : "尚未配置，绘图指令会提示先配置 API");
     } catch (error) {
@@ -1802,6 +1899,8 @@
   async function saveDrawingApi() {
     const button = document.querySelector("#api-save");
     const payload = {
+      profile_id: apiSelectedId || "default",
+      name: document.querySelector("#api-name").value.trim() || "默认 API",
       base_url: document.querySelector("#api-url").value.trim(),
       api_key: document.querySelector("#api-token").value.trim(),
       model: document.querySelector("#api-model").value.trim(),
@@ -1811,19 +1910,70 @@
     button.disabled = true;
     setApiStatus("正在保存…");
     try {
-      const result = await request("action", "save_drawing_api", {api_json: JSON.stringify(payload)});
+      const result = await request("action", "save_drawing_api_profile", {api_json: JSON.stringify(payload)});
       if (result.error) {
         setApiStatus(result.error, true);
         return;
       }
       apiLoaded = false;
       await loadDrawingApi();
-      setApiStatus("API 配置已保存");
+      apiSelectedId = payload.profile_id;
+      renderApiProfiles();
+      setApiStatus(
+        payload.profile_id === apiActiveId
+          ? "配置已保存，当前使用这套 API"
+          : "配置已保存；需要点击「切换使用」才会用于新任务"
+      );
     } catch (error) {
       setApiStatus(error.message || String(error), true);
     } finally {
       button.disabled = false;
     }
+  }
+
+  async function activateDrawingApi() {
+    if (!apiSelectedId) return;
+    try {
+      const result = await request("action", "activate_drawing_api", {profile_id: apiSelectedId});
+      if (result.error) throw new Error(result.error);
+      apiLoaded = false;
+      await loadDrawingApi();
+      setApiStatus("已切换当前 API");
+    } catch (error) {
+      setApiStatus(error.message || String(error), true);
+    }
+  }
+
+  async function deleteDrawingApi() {
+    if (!apiSelectedId) return;
+    if (!await confirmAction("确认删除当前这套绘图 API 配置？")) return;
+    try {
+      const result = await request("action", "delete_drawing_api", {profile_id: apiSelectedId});
+      if (result.error) throw new Error(result.error);
+      apiSelectedId = "";
+      apiLoaded = false;
+      await loadDrawingApi();
+      setApiStatus("API 配置已删除");
+    } catch (error) {
+      setApiStatus(error.message || String(error), true);
+    }
+  }
+
+  function newDrawingApi() {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const profile = {
+      profile_id: `api-${Date.now().toString(36)}-${suffix}`,
+      name: "新 API",
+      base_url: "",
+      api_key: "",
+      model: "",
+      size: "auto",
+      timeout_seconds: 180
+    };
+    apiProfiles.push(profile);
+    apiSelectedId = profile.profile_id;
+    renderApiProfiles();
+    setApiStatus("填写新 API 后点击保存");
   }
 
   async function fetchDrawingModels() {
@@ -2232,9 +2382,59 @@
     }
   }
 
+  async function chooseRetryApi(taskId) {
+    let config;
+    try {
+      config = await request("query", "drawing_api");
+    } catch (error) {
+      setTaskStatus("#history-status", error.message || String(error), true);
+      return null;
+    }
+    const profiles = Array.isArray(config.profiles) && config.profiles.length ? config.profiles : [config];
+    if (profiles.length <= 1) return profiles[0]?.profile_id || "";
+    return new Promise(resolve => {
+      let settled = false;
+      const body = make("div", "retry-api-body");
+      body.append(make("p", "muted", `为任务 #${taskId} 选择重试使用的绘图 API：`));
+      const select = make("select", "maibot-select");
+      select.setAttribute("aria-label", "选择重试 API");
+      for (const profile of profiles) {
+        const option = make("option", "", `${profile.name || "未命名 API"} — ${profile.model || "未设置模型"}${profile.configured ? "" : "（未配置完整）"}`);
+        option.value = profile.profile_id;
+        select.append(option);
+      }
+      select.value = config.active_id || profiles[0].profile_id;
+      body.append(select);
+      enhanceSelect(select);
+      const actions = make("div", "task-actions");
+      const cancel = make("button", "maibot-button", "取消");
+      const confirm = make("button", "maibot-button maibot-button-primary", "用这个 API 重试");
+      cancel.type = "button";
+      confirm.type = "button";
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        retryApiResolver = null;
+        closeModal();
+        resolve(value);
+      };
+      cancel.addEventListener("click", () => finish(null));
+      confirm.addEventListener("click", () => finish(select.value));
+      actions.append(cancel, confirm);
+      body.append(actions);
+      retryApiResolver = finish;
+      openModal("选择重试 API", body);
+    });
+  }
+
   async function retryTask(taskId) {
     try {
-      const result = await request("action", "retry_task", {task_id: taskId});
+      const apiProfileId = await chooseRetryApi(taskId);
+      if (apiProfileId === null) return;
+      const result = await request("action", "retry_task", {
+        task_id: taskId,
+        api_profile_id: apiProfileId
+      });
       if (result.error) throw new Error(result.error);
       setTaskStatus("#history-status", `任务 #${result.task_id} 已重新排队`);
       await loadTaskHistory(historyPage);
@@ -2279,10 +2479,15 @@
       setTaskStatus("#history-status", "先勾选要重试的历史任务", true);
       return;
     }
+    const apiProfileId = await chooseRetryApi(ids[0]);
+    if (apiProfileId === null) return;
     let succeeded = 0;
     for (const taskId of ids) {
       try {
-        const result = await request("action", "retry_task", {task_id: taskId});
+        const result = await request("action", "retry_task", {
+          task_id: taskId,
+          api_profile_id: apiProfileId
+        });
         if (!result.error) succeeded += 1;
       } catch (_) {
         // 单个任务失败不阻断其余选择。
@@ -2308,10 +2513,22 @@
     event.target.value = "";
     void importConfig(file);
   });
+  document.querySelector("#config-import-text-button").addEventListener("click", () => void importConfigText());
   document.querySelector("#replies-refresh").addEventListener("click", () => void loadReplies());
   document.querySelector("#replies-save").addEventListener("click", saveReplies);
   document.querySelector("#api-save").addEventListener("click", saveDrawingApi);
   document.querySelector("#api-models").addEventListener("click", fetchDrawingModels);
+  document.querySelector("#api-new").addEventListener("click", newDrawingApi);
+  document.querySelector("#api-activate").addEventListener("click", () => void activateDrawingApi());
+  document.querySelector("#api-delete").addEventListener("click", () => void deleteDrawingApi());
+  document.querySelector("#api-profile-select").addEventListener("change", event => {
+    apiSelectedId = event.target.value;
+    const profile = apiProfiles.find(item => item.profile_id === apiSelectedId);
+    if (profile) {
+      fillDrawingApiForm(profile);
+      setApiStatus(`正在编辑：${profile.name}`);
+    }
+  });
   document.querySelector("#current-refresh").addEventListener("click", () => void loadCurrentTasks());
   document.querySelector("#current-prev").addEventListener("click", () => {
     if (currentTasksPage <= 1) return;

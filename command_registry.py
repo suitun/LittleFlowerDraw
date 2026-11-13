@@ -40,6 +40,8 @@ DRAWING_COMMANDS: Dict[str, str] = {
     "group": "多人替换",
 }
 
+DRAWING_COMMAND_IDS = frozenset(DRAWING_COMMANDS.values())
+
 COMMAND_IDS: Tuple[str, ...] = tuple(spec.command_id for spec in COMMAND_SPECS)
 
 

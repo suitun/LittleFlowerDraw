@@ -82,6 +82,29 @@ class DrawingApiTests(unittest.TestCase):
             reopened = DrawingApiStore(Path(directory))
             self.assertEqual(reopened.load().api_key, "secret")
 
+    def test_store_supports_multiple_profiles_and_active_switch(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = DrawingApiStore(Path(directory))
+            store.load()
+            first = DrawingApiConfig(
+                profile_id="first", name="主力", base_url="https://first.test/v1", api_key="one", model="gpt-image-2"
+            )
+            second = DrawingApiConfig(
+                profile_id="second", name="备用", base_url="https://second.test/v1", api_key="two", model="gpt-image-2.5"
+            )
+            store.save_profile(first)
+            store.save_profile(second)
+            store.set_active("second")
+            self.assertEqual(store.current().model, "gpt-image-2.5")
+            self.assertEqual([item.name for item in store.list_profiles()], ["默认 API", "主力", "备用"])
+            reopened = DrawingApiStore(Path(directory))
+            reopened.load()
+            self.assertEqual(reopened.current().profile_id, "second")
+            reopened.set_active("first")
+            self.assertEqual(reopened.current().api_key, "one")
+            reopened.delete_profile("second")
+            self.assertEqual([item.profile_id for item in reopened.list_profiles()], ["default", "first"])
+
     def test_client_posts_multipart_images_and_decodes_b64(self) -> None:
         image = png()
         payload = json.dumps({"data": [{"b64_json": base64.b64encode(image).decode()}]}).encode()

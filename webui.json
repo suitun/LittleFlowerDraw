@@ -39,6 +39,10 @@
           "api": "webui_settings",
           "version": "1"
         },
+        "config_export": {
+          "api": "webui_config_export",
+          "version": "1"
+        },
         "drawing_api": {
           "api": "webui_drawing_api",
           "version": "1"
@@ -89,6 +93,27 @@
             "api_json": {"type": "string", "required": true, "max_length": 65536}
           }
         },
+        "save_drawing_api_profile": {
+          "api": "webui_drawing_api_save_profile",
+          "version": "1",
+          "parameters": {
+            "api_json": {"type": "string", "required": true, "max_length": 65536}
+          }
+        },
+        "activate_drawing_api": {
+          "api": "webui_drawing_api_activate",
+          "version": "1",
+          "parameters": {
+            "profile_id": {"type": "string", "required": true, "max_length": 64}
+          }
+        },
+        "delete_drawing_api": {
+          "api": "webui_drawing_api_delete",
+          "version": "1",
+          "parameters": {
+            "profile_id": {"type": "string", "required": true, "max_length": 64}
+          }
+        },
         "fetch_models": {
           "api": "webui_drawing_models",
           "version": "1",
@@ -108,7 +133,8 @@
           "api": "webui_task_retry",
           "version": "1",
           "parameters": {
-            "task_id": {"type": "integer", "minimum": 0, "maximum": 2147483647, "required": true}
+            "task_id": {"type": "integer", "minimum": 0, "maximum": 2147483647, "required": true},
+            "api_profile_id": {"type": "string", "max_length": 64}
           }
         },
         "delete_tasks": {

@@ -618,6 +618,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         requester_qq_name = str(user_info.get("user_nickname") or "").strip()
         if requester_qq_name == user_id:
             requester_qq_name = ""
+        remaining = -1
         try:
             async with self._task_submit_lock:
                 task = await asyncio.to_thread(
@@ -638,12 +639,16 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                     reference_image=reference,
                     api_model=api.model,
                     api_size=api.size,
+                    api_profile_id=api.profile_id,
                     max_waiting_tasks=queue_config.max_waiting_tasks,
                 )
                 try:
                     window = await asyncio.to_thread(guard.record_success, job.command_id, user_id)
                     if window:
                         await asyncio.to_thread(task_store.set_quota, task.id, window)
+                    remaining = await asyncio.to_thread(
+                        guard.remaining_quota, job.command_id, user_id
+                    )
                 except Exception:
                     self.ctx.logger.exception("小花绘任务次数记录失败：任务 #%s", task.id)
         except ActiveTaskError:
@@ -678,7 +683,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         await self._send_keyed_text(
             settings.drawing,
             "submitted_reply",
-            render_task_reply(settings.drawing.submitted_reply, task.id, position),
+            render_task_reply(settings.drawing.submitted_reply, task.id, position, remaining),
             stream_id,
             user_id,
         )
@@ -824,7 +829,13 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             if image is None:
                 raise DrawingApiError(f"角色「{role_name}」已不存在")
             role_images.append(image)
-        api = await asyncio.to_thread(self._require_drawing_api_store().current)
+        api_store = self._require_drawing_api_store()
+        if task.api_profile_id:
+            api = await asyncio.to_thread(api_store.get, task.api_profile_id)
+            if api is None:
+                raise DrawingApiError("任务使用的绘图 API 配置已删除")
+        else:
+            api = await asyncio.to_thread(api_store.current)
         if not api.configured:
             raise DrawingApiError("绘图 API 尚未配置")
         run_config = api.model_copy(update={"model": task.api_model, "size": task.api_size})
@@ -861,14 +872,22 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         )
 
     async def _send_completion(self, task: TaskRecord, stream_id: str, image: bytes) -> None:
-        """用一条图文混合消息 @ 发起人，发送短完成文案和结果图。"""
+        """先发送完成文案，再单独发送结果图。"""
         settings = self._settings_store.current() if self._settings_store is not None else None
         template = (
             pick_reply(settings.drawing.completion_reply)
             if settings is not None
             else "任务 #{任务ID} 画好啦喵～"
         )
-        text = render_task_reply(template, task.id)
+        remaining = -1
+        if self._guard is not None:
+            try:
+                remaining = await asyncio.to_thread(
+                    self._guard.remaining_quota, task.command_id, task.requester_id
+                )
+            except Exception:
+                self.ctx.logger.exception("读取任务 #%s 剩余次数失败", task.id)
+        text = render_task_reply(template, task.id, 0, remaining)
         if "{任务ID}" not in template:
             text = f"任务 #{task.id} {text}"
         segments = []
@@ -1166,6 +1185,9 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             "requester_qq_name": record.requester_qq_name,
             "group_id": record.group_id,
             "role_names": record.role_names,
+            "api_model": record.api_model,
+            "api_size": record.api_size,
+            "api_profile_id": record.api_profile_id,
             "created_at": record.created_at,
             "started_at": record.started_at,
             "finished_at": record.finished_at,
@@ -1187,6 +1209,25 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         settings = await asyncio.to_thread(self._require_settings_store().current)
         return settings.model_dump(mode="json")
 
+    @API("webui_config_export", description="把文本配置导出到 data_dir/exports", version="1")
+    async def webui_config_export(self) -> Dict[str, Any]:
+        settings = await asyncio.to_thread(self._require_settings_store().current)
+        payload = settings.model_dump(mode="json")
+        payload.pop("task_queue", None)
+        data = {
+            "format": "little-flower-draw-config",
+            "version": 1,
+            "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "settings": payload,
+        }
+        text = json.dumps(data, ensure_ascii=False, indent=2)
+        export_dir = self.ctx.paths.data_dir / "exports"
+        filename = f"little-flower-draw-config-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}.json"
+        path = export_dir / filename
+        await asyncio.to_thread(export_dir.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(path.write_text, text, encoding="utf-8")
+        return {"path": str(path), "filename": filename, "json": text}
+
     @API("webui_settings_save", description="保存 WebUI 管理的权限、白名单和提示文案", version="1")
     async def webui_settings_save(self, settings_json: str) -> Dict[str, Any]:
         try:
@@ -1207,10 +1248,19 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
 
     @API("webui_drawing_api", description="读取 OpenAI 兼容绘图 API 配置", version="1")
     async def webui_drawing_api(self) -> Dict[str, Any]:
-        config = await asyncio.to_thread(self._require_drawing_api_store().current)
+        store = self._require_drawing_api_store()
+        config = await asyncio.to_thread(store.current)
         payload = config.model_dump(mode="json")
         payload["configured"] = config.configured
         payload["endpoint"] = config.endpoint if config.base_url else ""
+        payload["active_id"] = await asyncio.to_thread(store.active_id)
+        profiles = []
+        for profile in await asyncio.to_thread(store.list_profiles):
+            item = profile.model_dump(mode="json")
+            item["configured"] = profile.configured
+            item["endpoint"] = profile.endpoint if profile.base_url else ""
+            profiles.append(item)
+        payload["profiles"] = profiles
         return payload
 
     @API("webui_drawing_api_save", description="保存 OpenAI 兼容绘图 API 配置", version="1")
@@ -1224,6 +1274,34 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             return {"saved": False, "error": str(error)}
         await asyncio.to_thread(self._require_drawing_api_store().save, config)
         return {"saved": True, "configured": config.configured}
+
+    @API("webui_drawing_api_save_profile", description="保存一套绘图 API 配置但不切换当前配置", version="1")
+    async def webui_drawing_api_save_profile(self, api_json: str) -> Dict[str, Any]:
+        try:
+            raw = json.loads(api_json)
+            if not isinstance(raw, dict):
+                raise ValueError("API 配置必须是 JSON 对象")
+            config = DrawingApiConfig.model_validate(raw)
+        except (json.JSONDecodeError, ValueError) as error:
+            return {"saved": False, "error": str(error)}
+        await asyncio.to_thread(self._require_drawing_api_store().save_profile, config)
+        return {"saved": True, "configured": config.configured}
+
+    @API("webui_drawing_api_activate", description="切换当前绘图 API 配置", version="1")
+    async def webui_drawing_api_activate(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            config = await asyncio.to_thread(self._require_drawing_api_store().set_active, profile_id)
+        except ValueError as error:
+            return {"activated": False, "error": str(error)}
+        return {"activated": True, "profile_id": config.profile_id}
+
+    @API("webui_drawing_api_delete", description="删除一套绘图 API 配置", version="1")
+    async def webui_drawing_api_delete(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            await asyncio.to_thread(self._require_drawing_api_store().delete_profile, profile_id)
+        except ValueError as error:
+            return {"deleted": False, "error": str(error)}
+        return {"deleted": True}
 
     @API("webui_drawing_models", description="查询 OpenAI 兼容接口的可用模型", version="1")
     async def webui_drawing_models(self, base_url: str = "", api_key: str = "") -> Dict[str, Any]:
@@ -1281,6 +1359,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 "final_prompt": task.final_prompt,
                 "api_model": task.api_model,
                 "api_size": task.api_size,
+                "api_profile_id": task.api_profile_id,
                 "quota_counted": task.quota_counted,
                 "quota_refunded": task.quota_refunded,
                 "source_message_id": task.source_message_id,
@@ -1297,7 +1376,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         return {"cancelled": True}
 
     @API("webui_task_retry", description="把失败或取消的历史任务重新排队，保留原任务 ID", version="1")
-    async def webui_task_retry(self, task_id: int) -> Dict[str, Any]:
+    async def webui_task_retry(self, task_id: int, api_profile_id: str = "") -> Dict[str, Any]:
         store = self._require_task_store()
         old = await asyncio.to_thread(store.get, task_id)
         if old is None:
@@ -1306,6 +1385,17 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             return {"retried": False, "error": "只有失败或取消的任务可以重试"}
         if old.reference_path and not Path(old.reference_path).is_file():
             return {"retried": False, "error": "原任务参考图已丢失"}
+        api_profile_id = api_profile_id.strip()
+        api_model = old.api_model
+        api_size = old.api_size
+        if api_profile_id:
+            profile = await asyncio.to_thread(self._require_drawing_api_store().get, api_profile_id)
+            if profile is None:
+                return {"retried": False, "error": "选择的绘图 API 配置不存在"}
+            if not profile.configured:
+                return {"retried": False, "error": "选择的绘图 API 尚未配置完整"}
+            api_model = profile.model
+            api_size = profile.size
         guard = self._guard
         if guard is None:
             raise RuntimeError("绘图权限守卫尚未初始化")
@@ -1320,7 +1410,13 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             if settings.task_queue.max_waiting_tasks > 0:
                 if await asyncio.to_thread(store.count_queued) >= settings.task_queue.max_waiting_tasks:
                     return {"retried": False, "error": "队列已满，请稍后再试"}
-            task = await asyncio.to_thread(store.retry, old.id)
+            task = await asyncio.to_thread(
+                store.retry,
+                old.id,
+                api_profile_id or None,
+                api_model,
+                api_size,
+            )
             if task is None:
                 return {"retried": False, "error": "任务状态已变化，无法重试"}
             try:
