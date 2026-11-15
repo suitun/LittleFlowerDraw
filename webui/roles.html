@@ -288,7 +288,7 @@
             <textarea id="setting-drawing-free-templates" class="maibot-input" rows="3" placeholder="小花画{提示词}"></textarea>
           </label>
         </div>
-        <p class="muted">多人替换用 @ 分隔角色，例如 <code>多人穿@角色1@角色2@角色3 换装</code>；自由绘画不依赖角色库，可以不带参考图。模板开头加 <code>@</code> 表示必须先 @ 机器人，例如 <code>@变{角色名} {额外提示词}</code>。</p>
+        <p class="muted">多人替换用 @ 分隔角色，例如 <code>多人穿@角色1@角色2@角色3 换装</code>；自由绘画不依赖角色库，可以不带参考图，也可以带多张图或引用一条多图消息，图片按发送顺序使用。模板开头加 <code>@</code> 表示必须先 @ 机器人，例如 <code>@变{角色名} {额外提示词}</code>。</p>
         <div class="settings-grid">
           <label class="settings-field">单角色基础提示词
             <textarea id="setting-drawing-replace-prompt" class="maibot-input" rows="3"></textarea>
@@ -441,7 +441,7 @@
     <div class="module-head">
       <div>
         <h2>当前任务</h2>
-        <p class="muted">排队中和绘制中的任务；每人同时只允许一个未结束任务。</p>
+        <p class="muted">排队中和绘制中的任务；普通用户每人同时只允许一个未结束任务，管理员可同时保留多个。</p>
       </div>
       <div class="actions">
         <button id="current-refresh" class="maibot-button" type="button">刷新</button>
@@ -1687,7 +1687,7 @@
         ["api_missing_reply", "API 未配置", "不需要占位符"],
         ["api_error_reply", "API 调用失败", "支持 {错误}"],
         ["task_failed_reply", "任务失败", "支持 {任务ID}、{错误}"],
-        ["image_rejected_reply", "图片不合规（400）", "支持 {任务ID}，接口返回 400 时使用"],
+        ["image_rejected_reply", "图片不合规（400/451）", "支持 {任务ID}，接口返回 400 或 451 时使用"],
         ["completion_reply", "任务完成", "支持 {任务ID}、{剩余次数}"]
       ]
     },
@@ -1696,7 +1696,6 @@
       description: "白名单、权限和次数限制相关提示。",
       source: "guard_replies",
       fields: [
-        ["whitelist_denied", "白名单拒绝", "不需要占位符"],
         ["admin_only", "仅管理员", "不需要占位符"],
         ["quota_exceeded", "次数用完", "支持 {指令}、{重置时间}"]
       ]

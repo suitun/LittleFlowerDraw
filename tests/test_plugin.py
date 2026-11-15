@@ -635,6 +635,32 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rpc.images, [generated])
         generate_text.assert_called_once()
 
+    async def test_free_drawing_uses_all_attached_images_in_order(self) -> None:
+        self.set_drawing_api()
+        red = png("red")
+        blue = png("blue")
+        generated = png("green")
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate",
+            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
+        ) as generate, patch.object(
+            PLUGIN_MODULE.LittleFlowerDrawPlugin,
+            "_save_drawing_image",
+            return_value=Path(self.temporary.name) / "free-multi.png",
+        ):
+            self.clear_output()
+            await self.submit(self.message("小花画一张双人图", [red, blue]))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+
+        self.assertEqual(finished.status, "succeeded")
+        self.assertEqual(finished.kind, "free")
+        self.assertEqual(len(finished.reference_paths), 2)
+        self.assertEqual([Path(path).name for path in finished.reference_paths], ["reference-1.png", "reference-2.png"])
+        self.assertEqual(generate.call_args.args[2], [red, blue])
+        self.assertEqual(self.rpc.images, [generated])
+
     async def test_webui_drawing_models_queries_configured_endpoint(self) -> None:
         with patch.object(PLUGIN_MODULE, "fetch_models", return_value=["gpt-image-1", "flux-image"]):
             result = await self.plugin.webui_drawing_models("https://relay.test/v1", "secret")
@@ -1094,7 +1120,7 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         result = await self.submit(self.message("小花小花这是 白名单外", [png("red")], group="10001"))
 
         self.assertEqual(result["action"], "abort")
-        self.assertEqual(self.rpc.texts, [self.guard_replies().whitelist_denied[0]])
+        self.assertEqual(self.rpc.texts, [])
         self.assertIsNone(self.plugin._store.get(PLUGIN_MODULE.GLOBAL_LIBRARY_SCOPE, "白名单外"))
 
     async def test_admin_bypasses_empty_whitelist(self) -> None:

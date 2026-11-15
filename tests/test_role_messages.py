@@ -200,6 +200,25 @@ class ImageResolverTests(unittest.IsolatedAsyncioTestCase):
         message = {"raw_message": [image_segment(self.red), image_segment(self.blue)]}
         self.assertEqual(await MessageImageResolver(self.ctx, ImageLimits()).resolve(message, "chat"), self.red)
 
+    async def test_resolve_many_preserves_attached_image_order(self) -> None:
+        message = {"raw_message": [image_segment(self.red), image_segment(self.blue)]}
+        self.assertEqual(
+            await MessageImageResolver(self.ctx, ImageLimits()).resolve_many(message, "chat"),
+            [self.red, self.blue],
+        )
+        self.ctx.message.get_by_id.assert_not_awaited()
+        self.ctx.api.call.assert_not_awaited()
+
+    async def test_resolve_many_reads_all_images_from_one_quoted_message(self) -> None:
+        self.ctx.message.get_by_id.return_value = {
+            "session_id": "chat",
+            "raw_message": [image_segment(self.red), image_segment(self.blue)],
+        }
+        self.assertEqual(
+            await MessageImageResolver(self.ctx, ImageLimits()).resolve_many(quoted_message(), "chat"),
+            [self.red, self.blue],
+        )
+
     async def test_individual_size_format_and_corruption_are_rejected(self) -> None:
         cases = [
             (self.red, ImageLimits(max_image_bytes=len(self.red) - 1)),

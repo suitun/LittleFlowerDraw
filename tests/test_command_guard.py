@@ -70,12 +70,14 @@ class CommandGuardTests(unittest.TestCase):
         self.assertTrue(self.guard.check_access("登记角色", "30001", "10001").allowed)
         denied_group = self.guard.check_access("登记角色", "30001", "10002")
         self.assertFalse(denied_group.allowed)
-        self.assertIn("白名单", denied_group.reply)
+        self.assertTrue(denied_group.silent)
+        self.assertEqual(denied_group.reply, "")
 
         self.assertTrue(self.guard.check_access("登记角色", "20001", "").allowed)
         denied_private = self.guard.check_access("登记角色", "20002", "")
         self.assertFalse(denied_private.allowed)
-        self.assertIn("白名单", denied_private.reply)
+        self.assertTrue(denied_private.silent)
+        self.assertEqual(denied_private.reply, "")
 
     def test_admin_only_command_rejects_everyone_else(self) -> None:
         self.settings()

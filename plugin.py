@@ -267,10 +267,11 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             raise RuntimeError("小花绘权限守卫尚未初始化")
         decision = guard.check_access(command_id, user_id, group_id)
         if not decision.allowed:
-            try:
-                await self._send_guard_reply(message, decision.reply, decision.reply_key)
-            except Exception:
-                self.ctx.logger.exception("小花绘权限提示未能送达")
+            if not decision.silent:
+                try:
+                    await self._send_guard_reply(message, decision.reply, decision.reply_key)
+                except Exception:
+                    self.ctx.logger.exception("小花绘权限提示未能送达")
             return {"action": "abort", "custom_result": {"handled_by": "小花绘"}}
         job = (
             LibraryJob(command_id, request, message, settings)
@@ -527,12 +528,13 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         user_id = str(job.message["message_info"]["user_info"]["user_id"])
         group = job.message["message_info"].get("group_info") or {}
         group_id = str(group.get("group_id") or "")
+        is_admin = guard.is_admin(settings, user_id)
 
         active = next(
             (task for task in await asyncio.to_thread(task_store.list_current, 1000) if task.requester_id == user_id),
             None,
         )
-        if active is not None:
+        if active is not None and not is_admin:
             await self._send_keyed_text(
                 settings.drawing,
                 "active_task_reply",
@@ -565,8 +567,13 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             max_image_bytes=settings.library.max_image_mb * 1024**2,
         )
         reference = b""
+        references: List[bytes] = []
         try:
-            reference = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
+            if is_free:
+                references = await MessageImageResolver(self.ctx, limits).resolve_many(job.message, stream_id)
+            else:
+                reference = await MessageImageResolver(self.ctx, limits).resolve(job.message, stream_id)
+                references = [reference]
         except MissingImageError:
             if not is_free:
                 await self._send_keyed_text(
@@ -637,10 +644,12 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                     extra_prompt=candidate.extra_prompt,
                     final_prompt=prompt,
                     reference_image=reference,
+                    reference_images=references if is_free else None,
                     api_model=api.model,
                     api_size=api.size,
                     api_profile_id=api.profile_id,
                     max_waiting_tasks=queue_config.max_waiting_tasks,
+                    allow_multiple=is_admin,
                 )
                 try:
                     window = await asyncio.to_thread(guard.record_success, job.command_id, user_id)
@@ -778,7 +787,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                             await asyncio.to_thread(task_store.set_stage, task.id, "retrying")
                         await asyncio.sleep(API_502_RETRY_DELAY)
                         continue
-                    if error.status_code == 400:
+                    if error.status_code in {400, 451}:
                         await self._fail_task(task, str(error), reply_key="image_rejected_reply")
                     else:
                         await self._fail_task(task, str(error))
@@ -816,11 +825,10 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         stream_id = await self._open_chat(message)
         await asyncio.to_thread(task_store.set_stage, task.id, "preparing")
         try:
-            reference = (
-                await asyncio.to_thread(Path(task.reference_path).read_bytes)
-                if task.reference_path
-                else b""
-            )
+            reference_paths = task.reference_paths or ([task.reference_path] if task.reference_path else [])
+            references = [
+                await asyncio.to_thread(Path(path).read_bytes) for path in reference_paths
+            ]
         except OSError as error:
             raise DrawingApiError("任务参考图已丢失") from error
         role_images: List[bytes] = []
@@ -840,16 +848,25 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             raise DrawingApiError("绘图 API 尚未配置")
         run_config = api.model_copy(update={"model": task.api_model, "size": task.api_size})
         await asyncio.to_thread(task_store.set_stage, task.id, "calling_api")
-        if task.kind == "free" and not reference:
+        if task.kind == "free" and not references:
             result = await asyncio.to_thread(
                 OpenAIImageClient().generate_text, run_config, task.final_prompt
             )
-        else:
+        elif task.kind == "free":
             result = await asyncio.to_thread(
                 OpenAIImageClient().generate,
                 run_config,
                 task.final_prompt,
-                [reference, *role_images],
+                references,
+            )
+        else:
+            if not references:
+                raise DrawingApiError("任务参考图已丢失")
+            result = await asyncio.to_thread(
+                OpenAIImageClient().generate,
+                run_config,
+                task.final_prompt,
+                [references[0], *role_images],
             )
         await asyncio.to_thread(task_store.set_stage, task.id, "saving")
         path = await asyncio.to_thread(
@@ -1383,7 +1400,9 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             return {"retried": False, "error": "任务不存在"}
         if old.status not in {"failed", "cancelled"}:
             return {"retried": False, "error": "只有失败或取消的任务可以重试"}
-        if old.reference_path and not Path(old.reference_path).is_file():
+        if old.reference_path and not all(
+            Path(path).is_file() for path in (old.reference_paths or [old.reference_path])
+        ):
             return {"retried": False, "error": "原任务参考图已丢失"}
         api_profile_id = api_profile_id.strip()
         api_model = old.api_model
@@ -1405,7 +1424,10 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         settings = await asyncio.to_thread(self._require_settings_store().current)
         async with self._task_submit_lock:
             current = await asyncio.to_thread(store.list_current, 1000)
-            if any(task.requester_id == old.requester_id for task in current):
+            if (
+                any(task.requester_id == old.requester_id for task in current)
+                and not guard.is_admin(settings, old.requester_id)
+            ):
                 return {"retried": False, "error": "该用户还有进行中的任务"}
             if settings.task_queue.max_waiting_tasks > 0:
                 if await asyncio.to_thread(store.count_queued) >= settings.task_queue.max_waiting_tasks:

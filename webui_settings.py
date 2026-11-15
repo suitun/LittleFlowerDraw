@@ -75,10 +75,6 @@ _DRAWING_PROMPTS = {
 
 
 class GuardReplyConfig(PluginConfigBase):
-    whitelist_denied: List[str] = Field(
-        default_factory=lambda: ["这里还不是小花能营业的地方呢，先请管理员把这里加进白名单吧喵～"],
-        description="群聊或私聊不在白名单、且白名单已开启时的回复。",
-    )
     admin_only: List[str] = Field(
         default_factory=lambda: ["这个指令只有管理员才能用哦，小花不能偷偷听别人的话喵～"],
         description="非管理员使用仅管理员指令时的回复。",
@@ -94,7 +90,7 @@ class GuardReplyConfig(PluginConfigBase):
     def normalize_variants(cls, value: object) -> List[str]:
         return normalize_reply_variants(value)
 
-    @field_validator("whitelist_denied", "admin_only", "quota_exceeded")
+    @field_validator("admin_only", "quota_exceeded")
     @classmethod
     def validate_templates(cls, values: List[str]) -> List[str]:
         result = [validate_guard_reply(value) for value in values if value.strip()]
@@ -105,7 +101,7 @@ class GuardReplyConfig(PluginConfigBase):
     @field_validator("at_replies")
     @classmethod
     def validate_at_replies(cls, values: List[str]) -> List[str]:
-        allowed = {"whitelist_denied", "admin_only", "quota_exceeded"}
+        allowed = {"admin_only", "quota_exceeded"}
         unknown = [value for value in values if value not in allowed]
         if unknown:
             raise ValueError("未知的权限提示类型: " + "、".join(unknown))

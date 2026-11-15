@@ -312,13 +312,17 @@ class MessageImageResolver:
         self.limits = limits
 
     async def resolve(self, message: Dict[str, Any], stream_id: str) -> bytes:
-        """读取角色唯一图片；附图有内容时只取第一张图片。"""
+        """读取角色唯一图片；有附图时只取第一张。"""
+        return (await self.resolve_many(message, stream_id))[0]
+
+    async def resolve_many(self, message: Dict[str, Any], stream_id: str) -> List[bytes]:
+        """按消息中的原始顺序读取全部附图，或引用消息中的全部图片。"""
         attached = _image_segments(message)
         if attached:
-            return await self._resolve_image(attached[0])
+            return await self._resolve_segments(attached)
         target_id = _reply_message_id(message)
         if not target_id:
-            raise MissingImageError("小花还没看到图片呢，请附上一张图片或引用图片消息喵")
+            raise MissingImageError("小花还没看到图片呢，请附上图片或引用图片消息喵")
         try:
             historical = await asyncio.wait_for(
                 self.ctx.message.get_by_id(target_id, stream_id=stream_id, include_binary_data=True),
@@ -334,7 +338,7 @@ class MessageImageResolver:
             historical_images = _image_segments(historical)
             if historical_images:
                 try:
-                    return await self._resolve_image(historical_images[0])
+                    return await self._resolve_segments(historical_images)
                 except MissingImageError:
                     # 历史记录中的媒体可能已被清理，再向连接器取这条消息的真实图片。
                     pass
@@ -344,8 +348,11 @@ class MessageImageResolver:
         self._check_quoted_group(message, detail)
         images = _image_segments(detail)
         if not images:
-            raise MissingImageError("引用的消息里没有图片，请附上一张图片喵")
-        return await self._resolve_image(images[0])
+            raise MissingImageError("引用的消息里没有图片，请附上图片喵")
+        return await self._resolve_segments(images)
+
+    async def _resolve_segments(self, segments: List[Dict[str, Any]]) -> List[bytes]:
+        return [await self._resolve_image(segment) for segment in segments]
 
     async def _resolve_image(self, segment: Dict[str, Any]) -> bytes:
         data = await self._load_segment(segment)

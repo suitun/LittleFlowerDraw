@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 import base64
 import io
@@ -27,6 +27,14 @@ class DrawingApiError(RuntimeError):
     def __init__(self, message: str, status_code: Optional[int] = None) -> None:
         self.status_code = status_code
         super().__init__(message)
+
+
+# 中转站不经过代理；使用独立 opener，避免系统代理关闭后 urllib 仍缓存旧代理。
+_DIRECT_OPENER = build_opener(ProxyHandler({}))
+
+
+def urlopen(request: Request, timeout: Optional[float] = None) -> Any:
+    return _DIRECT_OPENER.open(request, timeout=timeout)
 
 
 class DrawingApiConfig(PluginConfigBase):
@@ -407,17 +415,27 @@ def _resolve_size(config: DrawingApiConfig, reference: bytes) -> str:
     return min(choices, key=lambda value: abs(math.log(ratio / choices[value])))
 
 
-def _bad_request_message(detail: str) -> str:
-    """把上游 400 的文本归类成用户能看懂的原因。"""
+def _bad_request_message(detail: str, status_code: int = 400) -> str:
+    """把上游 400/451 的文本归类成用户能看懂的原因。"""
     lowered = detail.lower()
-    content_tokens = ("内容政策", "内容审核", "审核", "违反", "敏感", "content policy", "safety", "moderation")
+    content_tokens = (
+        "内容政策",
+        "内容审核",
+        "审核",
+        "违反",
+        "敏感",
+        "content policy",
+        "safety",
+        "unsafe",
+        "moderation",
+    )
     if any(token in lowered for token in content_tokens):
-        return "接口返回 400：图片或提示词内容未通过接口审核"
+        return f"接口返回 {status_code}：图片或提示词内容未通过接口审核"
     if any(token in lowered for token in ("too large", "size", "maximum", "4mb", "文件过大")):
-        return "接口返回 400：图片文件太大或尺寸不符合接口要求"
+        return f"接口返回 {status_code}：图片文件太大或尺寸不符合接口要求"
     if any(token in lowered for token in ("格式", "format", "图片有误", "invalid image", "unsupported", "supported")):
-        return "接口返回 400：图片格式或输入不符合接口要求"
-    return "接口返回 400，但没有提供明确原因"
+        return f"接口返回 {status_code}：图片格式或输入不符合接口要求"
+    return f"接口返回 {status_code}，但没有提供明确原因"
 
 
 class OpenAIImageClient:
@@ -456,9 +474,9 @@ class OpenAIImageClient:
                 raw = response.read()
         except HTTPError as error:
             detail = error.read(1200).decode("utf-8", "replace")
-            if error.code == 400:
+            if error.code in (400, 451):
                 error.close()
-                raise DrawingApiError(_bad_request_message(detail), status_code=400) from error
+                raise DrawingApiError(_bad_request_message(detail, error.code), status_code=error.code) from error
             raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}", status_code=error.code) from error
         except (URLError, TimeoutError, OSError) as error:
             raise DrawingApiError(f"绘图 API 请求失败: {error}") from error
@@ -507,9 +525,11 @@ class OpenAIImageClient:
                 raw = response.read()
         except HTTPError as error:
             detail = error.read(1200).decode("utf-8", "replace")
-            if error.code == 400:
+            if error.code in (400, 451):
                 error.close()
-                raise DrawingApiError(_bad_request_message(detail)) from error
+                raise DrawingApiError(
+                    _bad_request_message(detail, error.code), status_code=error.code
+                ) from error
             raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}", status_code=error.code) from error
         except (URLError, TimeoutError, OSError) as error:
             raise DrawingApiError(f"绘图 API 请求失败: {error}") from error
@@ -543,19 +563,47 @@ class OpenAIImageClient:
         if isinstance(remote, str) and remote:
             if remote.startswith("data:"):
                 return self._decode_data_uri(remote)
+            download_url = urljoin(endpoint, remote)
+            return self._download_image(download_url, config, endpoint)
+        raise DrawingApiError("绘图 API 返回中没有 b64_json 或 url")
+
+    @staticmethod
+    def _download_image(download_url: str, config: DrawingApiConfig, endpoint: str) -> bytes:
+        target = urlsplit(download_url)
+        source = urlsplit(endpoint)
+        headers = {
+            "Accept": "image/*",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0 Safari/537.36"
+            ),
+            "Referer": f"{source.scheme}://{source.netloc}/",
+        }
+        attempts: List[Dict[str, str]] = []
+        if (target.scheme, target.netloc) == (source.scheme, source.netloc):
+            authorized = dict(headers)
+            authorized["Authorization"] = f"Bearer {config.api_key}"
+            attempts.extend((authorized, headers))
+        else:
+            attempts.append(headers)
+        last_error: Optional[BaseException] = None
+        for attempt, request_headers in enumerate(attempts):
+            request = Request(download_url, headers=request_headers)
             try:
-                download_url = urljoin(endpoint, remote)
-                headers = {"Accept": "image/*"}
-                target = urlsplit(download_url)
-                source = urlsplit(endpoint)
-                if (target.scheme, target.netloc) == (source.scheme, source.netloc):
-                    headers["Authorization"] = f"Bearer {config.api_key}"
-                request = Request(download_url, headers=headers)
                 with urlopen(request, timeout=config.timeout_seconds) as response:
                     return response.read()
-            except (HTTPError, URLError, TimeoutError, OSError) as error:
-                raise DrawingApiError(f"下载绘图结果失败: {error}") from error
-        raise DrawingApiError("绘图 API 返回中没有 b64_json 或 url")
+            except HTTPError as error:
+                last_error = error
+                if error.code != 403 or attempt == len(attempts) - 1:
+                    error.close()
+                    break
+                error.close()
+            except (URLError, TimeoutError, OSError) as error:
+                last_error = error
+                break
+        host = target.hostname or target.netloc or "未知主机"
+        raise DrawingApiError(f"下载绘图结果失败: {last_error or '未知错误'}（{host}）") from last_error
 
     @staticmethod
     def _decode_data_uri(value: str) -> bytes:

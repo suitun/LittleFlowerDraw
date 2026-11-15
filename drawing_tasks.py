@@ -31,6 +31,7 @@ _ROW_COLUMNS = (
     "extra_prompt",
     "final_prompt",
     "reference_path",
+    "reference_paths_json",
     "api_model",
     "api_size",
     "quota_counted",
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS drawing_tasks (
     extra_prompt TEXT NOT NULL DEFAULT '',
     final_prompt TEXT NOT NULL,
     reference_path TEXT NOT NULL,
+    reference_paths_json TEXT NOT NULL DEFAULT '',
     api_model TEXT NOT NULL,
     api_size TEXT NOT NULL,
     quota_counted INTEGER NOT NULL DEFAULT 0,
@@ -86,10 +88,9 @@ CREATE TABLE IF NOT EXISTS drawing_tasks (
     api_profile_id TEXT NOT NULL DEFAULT ''
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS one_active_task_per_user
-ON drawing_tasks(requester_id)
-WHERE status IN ('queued', 'running');
-
+DROP INDEX IF EXISTS one_active_task_per_user;
+CREATE INDEX IF NOT EXISTS drawing_task_requester_status
+ON drawing_tasks(requester_id, status);
 CREATE INDEX IF NOT EXISTS drawing_task_queue_order
 ON drawing_tasks(status, id);
 """
@@ -97,9 +98,9 @@ _INSERT_TASK_SQL = """
 INSERT INTO drawing_tasks (
     id, status, stage, command_id, kind, requester_id, group_id, account_id, scope,
     source_message_id, source_key, role_names_json, extra_prompt, final_prompt,
-    reference_path, api_model, api_size, created_at, requester_group_name, requester_qq_name,
+    reference_path, reference_paths_json, api_model, api_size, created_at, requester_group_name, requester_qq_name,
     api_profile_id
-) VALUES (?, 'queued', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, 'queued', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -122,6 +123,7 @@ class TaskRecord:
     extra_prompt: str
     final_prompt: str
     reference_path: str
+    reference_paths: List[str]
     api_model: str
     api_size: str
     quota_counted: bool
@@ -180,20 +182,24 @@ def _row_to_record(row: Sequence[object]) -> TaskRecord:
         extra_prompt=str(row[12]),
         final_prompt=str(row[13]),
         reference_path=str(row[14]),
-        api_model=str(row[15]),
-        api_size=str(row[16]),
-        quota_counted=bool(row[17]),
-        quota_window_start=int(row[18]),
-        quota_refunded=bool(row[19]),
-        attempts=int(row[20]),
-        error=str(row[21]),
-        output_path=str(row[22]),
-        created_at=int(row[23]),
-        started_at=int(row[24]),
-        finished_at=int(row[25]),
-        requester_group_name=str(row[26]),
-        requester_qq_name=str(row[27]),
-        api_profile_id=str(row[28]),
+        reference_paths=[
+            str(path)
+            for path in (json.loads(str(row[15])) if str(row[15]) else ([str(row[14])] if row[14] else []))
+        ],
+        api_model=str(row[16]),
+        api_size=str(row[17]),
+        quota_counted=bool(row[18]),
+        quota_window_start=int(row[19]),
+        quota_refunded=bool(row[20]),
+        attempts=int(row[21]),
+        error=str(row[22]),
+        output_path=str(row[23]),
+        created_at=int(row[24]),
+        started_at=int(row[25]),
+        finished_at=int(row[26]),
+        requester_group_name=str(row[27]),
+        requester_qq_name=str(row[28]),
+        api_profile_id=str(row[29]),
     )
 
 
@@ -209,7 +215,7 @@ class DrawingTaskStore:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(_CREATE_SCHEMA_SQL)
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(drawing_tasks)")}
-            for column in ("requester_group_name", "requester_qq_name", "api_profile_id"):
+            for column in ("requester_group_name", "requester_qq_name", "api_profile_id", "reference_paths_json"):
                 if column not in columns:
                     connection.execute(
                         f"ALTER TABLE drawing_tasks ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
@@ -277,6 +283,8 @@ class DrawingTaskStore:
         api_size: str,
         api_profile_id: str = "",
         max_waiting_tasks: int = 0,
+        allow_multiple: bool = False,
+        reference_images: Optional[List[bytes]] = None,
     ) -> TaskRecord:
         """查重、并发检查、配额容量、ID 分配、参考图写入与入库在同一事务内完成。"""
         if not command_id or not requester_id or not account_id:
@@ -284,6 +292,9 @@ class DrawingTaskStore:
         if not source_key:
             raise ValueError("来源消息标识不能为空")
         if not isinstance(reference_image, bytes):
+            raise ValueError("参考图数据必须是字节")
+        images = list(reference_images) if reference_images is not None else ([reference_image] if reference_image else [])
+        if any(not isinstance(image, bytes) for image in images):
             raise ValueError("参考图数据必须是字节")
 
         now = int(time.time())
@@ -301,7 +312,7 @@ class DrawingTaskStore:
                     "SELECT id FROM drawing_tasks WHERE requester_id = ? AND status IN ('queued', 'running')",
                     (requester_id,),
                 ).fetchone()
-                if active is not None:
+                if active is not None and not allow_multiple:
                     raise ActiveTaskError(f"该用户已有进行中的绘图任务: {int(active[0])}")
                 if max_waiting_tasks > 0:
                     queued = int(
@@ -314,11 +325,15 @@ class DrawingTaskStore:
 
                 task_id = self._allocate_id(connection)
                 task_dir = self._task_dir(task_id)
-                reference_path = ""
-                if reference_image:
+                reference_paths: List[str] = []
+                if images:
                     task_dir.mkdir(parents=True, exist_ok=True)
-                    reference_path = task_dir / "reference.png"
-                    reference_path.write_bytes(reference_image)
+                    for index, image in enumerate(images):
+                        filename = "reference.png" if len(images) == 1 else f"reference-{index + 1}.png"
+                        path = task_dir / filename
+                        path.write_bytes(image)
+                        reference_paths.append(str(path))
+                reference_path = reference_paths[0] if reference_paths else ""
                 connection.execute(
                     _INSERT_TASK_SQL,
                     (
@@ -334,7 +349,8 @@ class DrawingTaskStore:
                         role_names_json,
                         extra_prompt,
                         final_prompt,
-                        str(reference_path),
+                        reference_path,
+                        json.dumps(reference_paths, ensure_ascii=False),
                         api_model,
                         api_size,
                         now,
@@ -366,6 +382,7 @@ class DrawingTaskStore:
             extra_prompt=extra_prompt,
             final_prompt=final_prompt,
             reference_path=str(reference_path),
+            reference_paths=reference_paths,
             api_model=api_model,
             api_size=api_size,
             quota_counted=False,

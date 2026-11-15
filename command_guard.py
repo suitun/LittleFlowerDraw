@@ -19,6 +19,7 @@ class AccessDecision:
     allowed: bool
     reply: str = ""
     reply_key: str = ""
+    silent: bool = False
 
 
 class CommandGuard:
@@ -85,8 +86,9 @@ class CommandGuard:
             if target_id not in allowed_ids:
                 return AccessDecision(
                     False,
-                    render_guard_reply(settings.guard_replies.whitelist_denied, command_label(command_id), ""),
+                    "",
                     "whitelist_denied",
+                    True,
                 )
         policy = self.policy_for(settings, command_id)
         if policy.permission == "仅管理员":

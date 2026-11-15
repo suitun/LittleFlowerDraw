@@ -24,6 +24,7 @@ def make_task(
     command_id: str = "绘图",
     max_waiting_tasks: int = 0,
     reference_image: bytes = b"reference-bytes",
+    allow_multiple: bool = False,
 ) -> TaskRecord:
     """用默认字段创建一个排队任务，测试只覆盖关注的参数。"""
     return store.create_task(
@@ -42,6 +43,7 @@ def make_task(
         api_model="gpt-image-1",
         api_size="1024x1024",
         max_waiting_tasks=max_waiting_tasks,
+        allow_multiple=allow_multiple,
     )
 
 
@@ -164,6 +166,13 @@ class DrawingTaskStoreTests(unittest.TestCase):
         self.store.fail(second.id, "API 调用失败")
         third = make_task(self.store, requester_id="user-a", source_key="message-c")
         self.assertEqual(third.id, second.id + 1)
+
+    def test_admin_can_keep_multiple_active_tasks(self) -> None:
+        first = make_task(self.store, requester_id="admin", source_key="admin-a", allow_multiple=True)
+        second = make_task(self.store, requester_id="admin", source_key="admin-b", allow_multiple=True)
+
+        self.assertEqual(second.id, first.id + 1)
+        self.assertEqual(len(self.store.list_current()), 2)
 
     def test_different_users_can_queue_at_the_same_time(self) -> None:
         first = make_task(self.store, requester_id="user-a", source_key="message-a")

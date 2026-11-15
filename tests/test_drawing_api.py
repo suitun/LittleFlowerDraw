@@ -105,6 +105,56 @@ class DrawingApiTests(unittest.TestCase):
             reopened.delete_profile("second")
             self.assertEqual([item.profile_id for item in reopened.list_profiles()], ["default", "first"])
 
+    def test_download_retries_without_authorization_after_403(self) -> None:
+        image = png()
+        response = MagicMock()
+        response.read.return_value = image
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        forbidden = HTTPError(
+            "https://relay.test/v1/files/result.png",
+            403,
+            "Forbidden",
+            None,
+            BytesIO(b"forbidden"),
+        )
+        config = DrawingApiConfig(base_url="https://relay.test/v1", api_key="secret", model="gpt-image-2.6")
+        with patch("drawing_api.urlopen", side_effect=[forbidden, response]) as mocked:
+            result = OpenAIImageClient()._decode_item(
+                {"url": "https://relay.test/v1/files/result.png"},
+                config,
+                config.endpoint,
+            )
+
+        self.assertEqual(result, image)
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(
+            mocked.call_args_list[0].args[0].get_header("Authorization"),
+            "Bearer secret",
+        )
+        self.assertIsNone(mocked.call_args_list[1].args[0].get_header("Authorization"))
+        self.assertIn("Mozilla", mocked.call_args_list[1].args[0].get_header("User-agent"))
+
+    def test_download_from_other_host_uses_browser_headers_without_token(self) -> None:
+        image = png()
+        response = MagicMock()
+        response.read.return_value = image
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        config = DrawingApiConfig(base_url="https://relay.test/v1", api_key="secret", model="gpt-image-2.6")
+        with patch("drawing_api.urlopen", return_value=response) as mocked:
+            result = OpenAIImageClient()._decode_item(
+                {"url": "https://cdn.test/result.png"},
+                config,
+                config.endpoint,
+            )
+
+        self.assertEqual(result, image)
+        request = mocked.call_args.args[0]
+        self.assertIsNone(request.get_header("Authorization"))
+        self.assertEqual(request.get_header("Referer"), "https://relay.test/")
+        self.assertIn("Mozilla", request.get_header("User-agent"))
+
     def test_client_posts_multipart_images_and_decodes_b64(self) -> None:
         image = png()
         payload = json.dumps({"data": [{"b64_json": base64.b64encode(image).decode()}]}).encode()
@@ -174,6 +224,25 @@ class DrawingApiTests(unittest.TestCase):
             OpenAIImageClient().generate(config, "换装", [png()])
         self.assertEqual(raised.exception.status_code, 400)
         self.assertNotIn("very long upstream detail", str(raised.exception))
+
+    def test_http_451_unsafe_becomes_short_image_rejected_error(self) -> None:
+        self.assertIn("451", _bad_request_message("unsafe image", 451))
+        error = HTTPError(
+            "https://relay.test/v1/images/edits",
+            451,
+            "Unavailable For Legal Reasons",
+            None,
+            BytesIO(
+                b'{"error":{"message":"The generated images appear to be unsafe. Try modifying the prompts or the seeds."}}'
+            ),
+        )
+        config = DrawingApiConfig(base_url="https://relay.test/v1", api_key="secret", model="gpt-image-2.6")
+        with patch("drawing_api.urlopen", side_effect=error), self.assertRaises(DrawingApiError) as raised:
+            OpenAIImageClient().generate(config, "换装", [png()])
+        self.assertEqual(raised.exception.status_code, 451)
+        self.assertIn("451", str(raised.exception))
+        self.assertIn("审核", str(raised.exception))
+        self.assertNotIn("appear to be unsafe", str(raised.exception))
 
     def test_client_requires_configuration(self) -> None:
         with self.assertRaises(DrawingApiError):
