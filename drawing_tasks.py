@@ -1,9 +1,9 @@
 """绘图任务的本地持久化存储：排队顺序、状态流转与历史记录。"""
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import json
 import shutil
@@ -36,6 +36,7 @@ _ROW_COLUMNS = (
     "api_size",
     "quota_counted",
     "quota_window_start",
+    "group_quota_window_start",
     "quota_refunded",
     "attempts",
     "error",
@@ -46,6 +47,9 @@ _ROW_COLUMNS = (
     "requester_group_name",
     "requester_qq_name",
     "api_profile_id",
+    "api_response_json",
+    "api_request_json",
+    "api_attempts_json",
 )
 _SELECT_TASK_SQL = f"SELECT {', '.join(_ROW_COLUMNS)} FROM drawing_tasks"
 _CREATE_SCHEMA_SQL = """
@@ -76,6 +80,7 @@ CREATE TABLE IF NOT EXISTS drawing_tasks (
     api_size TEXT NOT NULL,
     quota_counted INTEGER NOT NULL DEFAULT 0,
     quota_window_start INTEGER NOT NULL DEFAULT 0,
+    group_quota_window_start INTEGER NOT NULL DEFAULT 0,
     quota_refunded INTEGER NOT NULL DEFAULT 0,
     attempts INTEGER NOT NULL DEFAULT 0,
     error TEXT NOT NULL DEFAULT '',
@@ -85,7 +90,10 @@ CREATE TABLE IF NOT EXISTS drawing_tasks (
     finished_at INTEGER NOT NULL DEFAULT 0,
     requester_group_name TEXT NOT NULL DEFAULT '',
     requester_qq_name TEXT NOT NULL DEFAULT '',
-    api_profile_id TEXT NOT NULL DEFAULT ''
+    api_profile_id TEXT NOT NULL DEFAULT '',
+    api_response_json TEXT NOT NULL DEFAULT '{}',
+    api_request_json TEXT NOT NULL DEFAULT '{}',
+    api_attempts_json TEXT NOT NULL DEFAULT '[]'
 );
 
 DROP INDEX IF EXISTS one_active_task_per_user;
@@ -99,8 +107,8 @@ INSERT INTO drawing_tasks (
     id, status, stage, command_id, kind, requester_id, group_id, account_id, scope,
     source_message_id, source_key, role_names_json, extra_prompt, final_prompt,
     reference_path, reference_paths_json, api_model, api_size, created_at, requester_group_name, requester_qq_name,
-    api_profile_id
-) VALUES (?, 'queued', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    api_profile_id, group_quota_window_start
+) VALUES (?, 'queued', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 """
 
 
@@ -128,6 +136,7 @@ class TaskRecord:
     api_size: str
     quota_counted: bool
     quota_window_start: int
+    group_quota_window_start: int
     quota_refunded: bool
     attempts: int
     error: str
@@ -138,6 +147,9 @@ class TaskRecord:
     requester_group_name: str = ""
     requester_qq_name: str = ""
     api_profile_id: str = ""
+    api_response: Dict[str, Any] = field(default_factory=dict)
+    api_request: Dict[str, Any] = field(default_factory=dict)
+    api_attempts: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class TaskStoreError(RuntimeError):
@@ -190,16 +202,20 @@ def _row_to_record(row: Sequence[object]) -> TaskRecord:
         api_size=str(row[17]),
         quota_counted=bool(row[18]),
         quota_window_start=int(row[19]),
-        quota_refunded=bool(row[20]),
-        attempts=int(row[21]),
-        error=str(row[22]),
-        output_path=str(row[23]),
-        created_at=int(row[24]),
-        started_at=int(row[25]),
-        finished_at=int(row[26]),
-        requester_group_name=str(row[27]),
-        requester_qq_name=str(row[28]),
-        api_profile_id=str(row[29]),
+        group_quota_window_start=int(row[20]),
+        quota_refunded=bool(row[21]),
+        attempts=int(row[22]),
+        error=str(row[23]),
+        output_path=str(row[24]),
+        created_at=int(row[25]),
+        started_at=int(row[26]),
+        finished_at=int(row[27]),
+        requester_group_name=str(row[28]),
+        requester_qq_name=str(row[29]),
+        api_profile_id=str(row[30]),
+        api_response=json.loads(str(row[31])) if str(row[31]) else {},
+        api_request=json.loads(str(row[32])) if str(row[32]) else {},
+        api_attempts=json.loads(str(row[33])) if str(row[33]) else [],
     )
 
 
@@ -215,11 +231,15 @@ class DrawingTaskStore:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(_CREATE_SCHEMA_SQL)
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(drawing_tasks)")}
-            for column in ("requester_group_name", "requester_qq_name", "api_profile_id", "reference_paths_json"):
+            for column in ("requester_group_name", "requester_qq_name", "api_profile_id", "reference_paths_json", "api_response_json", "api_request_json", "api_attempts_json"):
                 if column not in columns:
                     connection.execute(
                         f"ALTER TABLE drawing_tasks ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
                     )
+            if "group_quota_window_start" not in columns:
+                connection.execute(
+                    "ALTER TABLE drawing_tasks ADD COLUMN group_quota_window_start INTEGER NOT NULL DEFAULT 0"
+                )
             connection.execute("PRAGMA user_version = 1")
 
     @contextmanager
@@ -387,6 +407,7 @@ class DrawingTaskStore:
             api_size=api_size,
             quota_counted=False,
             quota_window_start=0,
+            group_quota_window_start=0,
             quota_refunded=False,
             attempts=0,
             error="",
@@ -408,6 +429,42 @@ class DrawingTaskStore:
             )
         if cursor.rowcount == 0:
             raise TaskNotFoundError(f"绘图任务不存在: {task_id}")
+
+    def set_group_quota(self, task_id: int, window_start: int) -> None:
+        """记录该任务已计入群共享额度及其时间窗口。"""
+        with self._connection() as connection, connection:
+            cursor = connection.execute(
+                "UPDATE drawing_tasks SET group_quota_window_start = ? WHERE id = ?",
+                (int(window_start), task_id),
+            )
+        if cursor.rowcount == 0:
+            raise TaskNotFoundError(f"绘图任务不存在: {task_id}")
+
+    def set_api_request(self, task_id: int, request: Dict[str, Any]) -> None:
+        """记录实际发送给绘图 API 的请求元数据，不包含密钥。"""
+        with self._connection() as connection, connection:
+            cursor = connection.execute(
+                "UPDATE drawing_tasks SET api_request_json = ? WHERE id = ?",
+                (json.dumps(request, ensure_ascii=False), task_id),
+            )
+        if cursor.rowcount == 0:
+            raise TaskNotFoundError(f"绘图任务不存在: {task_id}")
+
+    def append_api_attempt(self, task_id: int, attempt: Dict[str, Any]) -> None:
+        """追加一次 API 调用记录，保留最近 20 次重试。"""
+        with self._connection() as connection, connection:
+            row = connection.execute(
+                "SELECT api_attempts_json FROM drawing_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if row is None:
+                raise TaskNotFoundError(f"绘图任务不存在: {task_id}")
+            attempts = json.loads(str(row[0])) if str(row[0]) else []
+            attempts.append(attempt)
+            attempts = attempts[-20:]
+            connection.execute(
+                "UPDATE drawing_tasks SET api_attempts_json = ? WHERE id = ?",
+                (json.dumps(attempts, ensure_ascii=False), task_id),
+            )
 
     def mark_refunded(self, task_id: int) -> None:
         """标记该任务的配额已经退还。"""
@@ -452,13 +509,16 @@ class DrawingTaskStore:
         if cursor.rowcount == 0:
             raise TaskNotFoundError(f"绘图任务不存在: {task_id}")
 
-    def succeed(self, task_id: int, output_path: str) -> None:
-        """把任务标记为成功并记录生成图路径。"""
+    def succeed(
+        self, task_id: int, output_path: str, api_response: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """把任务标记为成功并记录生成图路径和完整 API 响应。"""
+        response_json = json.dumps(api_response or {}, ensure_ascii=False)
         with self._connection() as connection, connection:
             cursor = connection.execute(
-                "UPDATE drawing_tasks SET status = 'succeeded', stage = '', output_path = ?, finished_at = ? "
-                "WHERE id = ?",
-                (output_path, int(time.time()), task_id),
+                "UPDATE drawing_tasks SET status = 'succeeded', stage = '', output_path = ?, finished_at = ?, "
+                "api_response_json = ? WHERE id = ?",
+                (output_path, int(time.time()), response_json, task_id),
             )
         if cursor.rowcount == 0:
             raise TaskNotFoundError(f"绘图任务不存在: {task_id}")
@@ -506,6 +566,7 @@ class DrawingTaskStore:
             "finished_at = 0",
             "quota_counted = 0",
             "quota_window_start = 0",
+            "group_quota_window_start = 0",
             "quota_refunded = 0",
         ]
         parameters: List[object] = []

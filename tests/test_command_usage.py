@@ -86,6 +86,16 @@ class CommandUsageStoreTests(unittest.TestCase):
             self.store.refund_once(43, "user", "登记角色", old_window)
             self.assertEqual(self.store.check("user", "登记角色", 2, 1).used, 1)
 
+    def test_group_usage_and_refund_are_isolated_by_group(self) -> None:
+        now = local_timestamp(10, 12)
+        with patch("command_usage.time.time", return_value=now):
+            window = self.store.record_group_success("10001", "画画", 2, 1)
+            self.assertEqual(self.store.check_group("10001", "画画", 2, 1).used, 1)
+            self.assertEqual(self.store.check_group("10002", "画画", 2, 1).used, 0)
+            self.assertTrue(self.store.refund_group_once(99, "10001", "画画", window))
+            self.assertEqual(self.store.check_group("10001", "画画", 2, 1).used, 0)
+            self.assertFalse(self.store.refund_group_once(99, "10001", "画画", window))
+
     def test_usage_survives_reopening(self) -> None:
         now = local_timestamp(10, 12)
         with patch("command_usage.time.time", return_value=now):

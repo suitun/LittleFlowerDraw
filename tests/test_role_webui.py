@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from tempdir import TemporaryDirectory
 from types import ModuleType
+from unittest.mock import patch
 
 import base64
 import sys
@@ -29,6 +30,7 @@ detail_payload = role_webui.detail_payload
 list_payload = role_webui.list_payload
 render_preview = role_webui.render_preview
 render_thumbnail = role_webui.render_thumbnail
+render_path_cached = role_webui.render_path_cached
 thumbnail_payload = role_webui.thumbnail_payload
 
 
@@ -66,6 +68,15 @@ class RoleWebUITests(unittest.TestCase):
             self.assertLessEqual(max(decoded.size), 1280)
         self.assertLessEqual(len(thumbnail), MAX_THUMBNAIL_BYTES)
         self.assertLessEqual(len(preview), MAX_PREVIEW_BYTES)
+
+    def test_task_path_thumbnail_is_cached_by_file_fingerprint(self) -> None:
+        path = self.root / "task.png"
+        path.write_bytes(png_bytes((900, 700)))
+        with patch.object(role_webui, "render_thumbnail", wraps=render_thumbnail) as renderer:
+            first = render_path_cached(self.cache_dir, path, "thumb")
+            second = render_path_cached(self.cache_dir, path, "thumb")
+        self.assertEqual(first, second)
+        self.assertEqual(renderer.call_count, 1)
 
     def test_invalid_image_cannot_be_rendered(self) -> None:
         with self.assertRaises(ImageRenderError):

@@ -1,6 +1,6 @@
 """OpenAI 兼容的图片编辑接口配置与客户端。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
@@ -14,6 +14,7 @@ import math
 import os
 import re
 import threading
+import time
 import uuid
 
 from maibot_sdk import Field, PluginConfigBase
@@ -24,9 +25,23 @@ from pydantic import field_validator, model_validator
 class DrawingApiError(RuntimeError):
     """绘图接口调用失败；status_code 保留上游 HTTP 状态。"""
 
-    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        response: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.status_code = status_code
+        self.response = response or {}
         super().__init__(message)
+
+
+def _error_response(detail: str) -> Dict[str, Any]:
+    try:
+        payload = json.loads(detail)
+    except (TypeError, json.JSONDecodeError):
+        return {"body": detail[:4000]}
+    return _sanitize_api_response(payload)
 
 
 # 中转站不经过代理；使用独立 opener，避免系统代理关闭后 urllib 仍缓存旧代理。
@@ -35,6 +50,38 @@ _DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 def urlopen(request: Request, timeout: Optional[float] = None) -> Any:
     return _DIRECT_OPENER.open(request, timeout=timeout)
+
+
+_TRANSIENT_HTTP_STATUSES = {429, 503}
+_TRANSIENT_RETRY_LIMIT = 3
+
+
+def _retry_delay(error: HTTPError, attempt: int) -> float:
+    retry_after = error.headers.get("Retry-After") if error.headers is not None else None
+    if retry_after:
+        try:
+            return min(60.0, max(0.5, float(retry_after)))
+        except ValueError:
+            pass
+    return min(30.0, 1.0 * (2**attempt))
+
+
+def urlopen_with_retry(request: Request, timeout: Optional[float] = None) -> Any:
+    """对 429/503 做指数退避；优先使用上游 Retry-After。"""
+    last_error: Optional[HTTPError] = None
+    for attempt in range(_TRANSIENT_RETRY_LIMIT):
+        try:
+            return urlopen(request, timeout=timeout)
+        except HTTPError as error:
+            if error.code not in _TRANSIENT_HTTP_STATUSES or attempt == _TRANSIENT_RETRY_LIMIT - 1:
+                raise
+            last_error = error
+            delay = _retry_delay(error, attempt)
+            error.close()
+            time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+    raise DrawingApiError("绘图 API 请求重试失败")
 
 
 class DrawingApiConfig(PluginConfigBase):
@@ -47,6 +94,16 @@ class DrawingApiConfig(PluginConfigBase):
         default="auto",
         max_length=20,
         description="生成尺寸：auto、reference，或 1024x1024 这类固定尺寸",
+    )
+    quality: str = Field(
+        default="auto",
+        max_length=20,
+        description="输出质量：auto、low、medium、high、xhigh 或 max",
+    )
+    complexity: str = Field(
+        default="auto",
+        max_length=20,
+        description="规划复杂度：auto、low、medium 或 high；auto 时不发送该字段",
     )
     timeout_seconds: int = Field(default=180, ge=30, le=600, description="单次 API 请求超时秒数")
 
@@ -92,10 +149,30 @@ class DrawingApiConfig(PluginConfigBase):
         if match is None:
             raise ValueError("尺寸应为 auto、reference 或 1024x1024 格式")
         width, height = int(match.group(1)), int(match.group(2))
-        if not (256 <= width <= 2048 and 256 <= height <= 2048):
-            raise ValueError("尺寸每条边必须在 256-2048 像素之间")
-        if width * height > 4_194_304:
-            raise ValueError("尺寸不能超过 4 百万像素")
+        if width > 3840 or height > 3840:
+            raise ValueError("尺寸单边不能超过 3840 像素")
+        if width % 16 or height % 16:
+            raise ValueError("尺寸宽高必须是 16 的倍数")
+        if max(width, height) / min(width, height) > 3:
+            raise ValueError("尺寸长短边比例不能超过 3:1")
+        if not 655_360 <= width * height <= 8_294_400:
+            raise ValueError("尺寸总像素必须在 655360-8294400 之间")
+        return value
+
+    @field_validator("quality")
+    @classmethod
+    def validate_quality(cls, value: str) -> str:
+        value = value.strip()
+        if value not in {"auto", "low", "medium", "high", "xhigh", "max"}:
+            raise ValueError("质量必须是 auto、low、medium、high、xhigh 或 max")
+        return value
+
+    @field_validator("complexity")
+    @classmethod
+    def validate_complexity(cls, value: str) -> str:
+        value = value.strip()
+        if value not in {"auto", "low", "medium", "high"}:
+            raise ValueError("复杂度必须是 auto、low、medium 或 high")
         return value
 
     @model_validator(mode="after")
@@ -127,6 +204,31 @@ class DrawingApiConfig(PluginConfigBase):
         return value + "/v1/images/generations"
 
 
+class DrawingApiRoute(PluginConfigBase):
+    """按群聊或私聊指定使用的绘图 API。"""
+
+    name: str = Field(default="", max_length=80, description="规则名称，仅用于展示")
+    scope: str = Field(..., max_length=10, description="group 或 private")
+    target_id: str = Field(..., max_length=20, description="群号或 QQ 号")
+    profile_id: str = Field(..., max_length=64, description="API 配置标识")
+
+    @field_validator("scope")
+    @classmethod
+    def validate_scope(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"group", "private"}:
+            raise ValueError("路由类型必须是 group 或 private")
+        return value
+
+    @field_validator("target_id")
+    @classmethod
+    def validate_target(cls, value: str) -> str:
+        value = value.strip()
+        if not re.fullmatch(r"\d{5,20}", value):
+            raise ValueError("群号或 QQ 号必须是 5-20 位数字")
+        return value
+
+
 class DrawingApiStore:
     """多套 API 配置独立保存；每套配置有自己的模型标识。"""
 
@@ -136,16 +238,19 @@ class DrawingApiStore:
         self.path = data_dir / "drawing_api.json"
         self._lock = threading.Lock()
         self._profiles: Dict[str, DrawingApiConfig] = {}
+        self._routes: Dict[tuple[str, str], DrawingApiRoute] = {}
         self._active_id = ""
 
     def load(self) -> DrawingApiConfig:
         with self._lock:
             changed = False
+            raw_routes: List[object] = []
             if self.path.is_file():
                 raw = json.loads(self.path.read_text(encoding="utf-8"))
                 if isinstance(raw, dict) and isinstance(raw.get("profiles"), list):
                     profiles = [DrawingApiConfig.model_validate(item) for item in raw["profiles"]]
                     active_id = str(raw.get("active_id") or "").strip()
+                    raw_routes = raw.get("routes") if isinstance(raw.get("routes"), list) else []
                 else:
                     legacy = DrawingApiConfig.model_validate(raw)
                     profiles = [legacy]
@@ -167,6 +272,18 @@ class DrawingApiStore:
                 active_id = next(iter(self._profiles))
                 changed = True
             self._active_id = active_id
+            routes: Dict[tuple[str, str], DrawingApiRoute] = {}
+            for item in raw_routes:
+                try:
+                    route = DrawingApiRoute.model_validate(item)
+                except ValueError:
+                    changed = True
+                    continue
+                if route.profile_id not in self._profiles:
+                    changed = True
+                    continue
+                routes[(route.scope, route.target_id)] = route
+            self._routes = routes
             if changed:
                 self._write()
             return self._profiles[self._active_id].model_copy(deep=True)
@@ -215,6 +332,32 @@ class DrawingApiStore:
             self._write()
             return self._profiles[profile_id].model_copy(deep=True)
 
+    def list_routes(self) -> List[DrawingApiRoute]:
+        with self._lock:
+            return [route.model_copy(deep=True) for route in self._routes.values()]
+
+    def save_routes(self, routes: List[DrawingApiRoute]) -> List[DrawingApiRoute]:
+        with self._lock:
+            next_routes: Dict[tuple[str, str], DrawingApiRoute] = {}
+            for route in routes:
+                if route.profile_id not in self._profiles:
+                    raise ValueError(f"API 配置不存在: {route.profile_id}")
+                key = (route.scope, route.target_id)
+                if key in next_routes:
+                    raise ValueError(f"群号或 QQ 号重复: {route.target_id}")
+                next_routes[key] = route
+            self._routes = next_routes
+            self._write()
+            return [route.model_copy(deep=True) for route in self._routes.values()]
+
+    def resolve(self, scope: str, target_id: str) -> Optional[DrawingApiConfig]:
+        """按群聊/私聊返回指定配置；没有匹配时返回 None。"""
+        route = self._routes.get((scope, target_id))
+        if route is None:
+            return None
+        profile = self._profiles.get(route.profile_id)
+        return profile.model_copy(deep=True) if profile is not None else None
+
     def delete_profile(self, profile_id: str) -> None:
         with self._lock:
             if profile_id not in self._profiles:
@@ -222,6 +365,9 @@ class DrawingApiStore:
             if len(self._profiles) <= 1:
                 raise ValueError("至少保留一套 API 配置")
             del self._profiles[profile_id]
+            self._routes = {
+                key: route for key, route in self._routes.items() if route.profile_id != profile_id
+            }
             if self._active_id == profile_id:
                 self._active_id = next(iter(self._profiles))
             self._write()
@@ -232,6 +378,7 @@ class DrawingApiStore:
             "version": self._VERSION,
             "active_id": self._active_id,
             "profiles": [profile.model_dump(mode="json") for profile in self._profiles.values()],
+            "routes": [route.model_dump(mode="json") for route in self._routes.values()],
         }
         temporary = self.path.with_name(self.path.name + f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(
@@ -351,6 +498,7 @@ def _multipart(
 class DrawingResult:
     image: bytes
     prompt: str
+    response: Dict[str, Any] = field(default_factory=dict)
 
 
 def models_endpoint(base_url: str) -> str:
@@ -415,6 +563,25 @@ def _resolve_size(config: DrawingApiConfig, reference: bytes) -> str:
     return min(choices, key=lambda value: abs(math.log(ratio / choices[value])))
 
 
+def _sanitize_api_response(payload: Any) -> Dict[str, Any]:
+    """保留完整响应结构，但省略重复的大段 base64 图片数据。"""
+    if not isinstance(payload, dict):
+        return {"payload": str(payload)[:2000]}
+    try:
+        result = json.loads(json.dumps(payload))
+    except (TypeError, ValueError):
+        return {"payload": str(payload)[:2000]}
+    items = result.get("data")
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            encoded = item.get("b64_json")
+            if isinstance(encoded, str):
+                item["b64_json"] = f"<omitted {len(encoded)} chars>"
+    return result
+
+
 def _bad_request_message(detail: str, status_code: int = 400) -> str:
     """把上游 400/451 的文本归类成用户能看懂的原因。"""
     lowered = detail.lower()
@@ -452,7 +619,11 @@ class OpenAIImageClient:
             "prompt": prompt,
             "size": _resolve_size(config, prepared[0][0]),
             "n": "1",
+            "quality": config.quality,
+            "output_format": "png",
         }
+        if config.complexity != "auto":
+            fields["complexity"] = config.complexity
         files = [
             ("image[]", f"image{index + 1}.{extension}", data, content_type)
             for index, (data, extension, content_type) in enumerate(prepared)
@@ -470,14 +641,22 @@ class OpenAIImageClient:
             },
         )
         try:
-            with urlopen(request, timeout=config.timeout_seconds) as response:
+            with urlopen_with_retry(request, timeout=config.timeout_seconds) as response:
                 raw = response.read()
         except HTTPError as error:
             detail = error.read(1200).decode("utf-8", "replace")
             if error.code in (400, 451):
                 error.close()
-                raise DrawingApiError(_bad_request_message(detail, error.code), status_code=error.code) from error
-            raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}", status_code=error.code) from error
+                raise DrawingApiError(
+                    _bad_request_message(detail, error.code),
+                    status_code=error.code,
+                    response=_error_response(detail),
+                ) from error
+            raise DrawingApiError(
+                f"绘图 API 返回 HTTP {error.code}: {detail}",
+                status_code=error.code,
+                response=_error_response(detail),
+            ) from error
         except (URLError, TimeoutError, OSError) as error:
             raise DrawingApiError(f"绘图 API 请求失败: {error}") from error
 
@@ -496,7 +675,11 @@ class OpenAIImageClient:
                 image.verify()
         except (UnidentifiedImageError, OSError) as error:
             raise DrawingApiError("绘图 API 返回的图片无法识别") from error
-        return DrawingResult(image=image_bytes, prompt=prompt)
+        return DrawingResult(
+            image=image_bytes,
+            prompt=prompt,
+            response=_sanitize_api_response(payload),
+        )
 
     def generate_text(self, config: DrawingApiConfig, prompt: str) -> DrawingResult:
         """没有参考图时走 /v1/images/generations 的纯文生图。"""
@@ -507,7 +690,11 @@ class OpenAIImageClient:
             "prompt": prompt,
             "size": "auto" if config.size == "reference" else config.size,
             "n": 1,
+            "quality": config.quality,
+            "output_format": "png",
         }
+        if config.complexity != "auto":
+            payload["complexity"] = config.complexity
         endpoint = config.generation_endpoint
         request = Request(
             endpoint,
@@ -521,16 +708,22 @@ class OpenAIImageClient:
             },
         )
         try:
-            with urlopen(request, timeout=config.timeout_seconds) as response:
+            with urlopen_with_retry(request, timeout=config.timeout_seconds) as response:
                 raw = response.read()
         except HTTPError as error:
             detail = error.read(1200).decode("utf-8", "replace")
             if error.code in (400, 451):
                 error.close()
                 raise DrawingApiError(
-                    _bad_request_message(detail, error.code), status_code=error.code
+                    _bad_request_message(detail, error.code),
+                    status_code=error.code,
+                    response=_error_response(detail),
                 ) from error
-            raise DrawingApiError(f"绘图 API 返回 HTTP {error.code}: {detail}", status_code=error.code) from error
+            raise DrawingApiError(
+                f"绘图 API 返回 HTTP {error.code}: {detail}",
+                status_code=error.code,
+                response=_error_response(detail),
+            ) from error
         except (URLError, TimeoutError, OSError) as error:
             raise DrawingApiError(f"绘图 API 请求失败: {error}") from error
 
@@ -548,7 +741,11 @@ class OpenAIImageClient:
                 image.verify()
         except (UnidentifiedImageError, OSError) as error:
             raise DrawingApiError("绘图 API 返回的图片无法识别") from error
-        return DrawingResult(image=image_bytes, prompt=prompt)
+        return DrawingResult(
+            image=image_bytes,
+            prompt=prompt,
+            response=_sanitize_api_response(payload_data),
+        )
 
     def _decode_item(self, item: Dict[str, Any], config: DrawingApiConfig, endpoint: str) -> bytes:
         encoded = item.get("b64_json")

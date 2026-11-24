@@ -91,6 +91,11 @@ class CommandGuard:
                     True,
                 )
         policy = self.policy_for(settings, command_id)
+        if any(
+            permission.user_id == user_id and permission.command == command_id
+            for permission in settings.user_permissions
+        ):
+            return AccessDecision(True)
         if policy.permission == "仅管理员":
             return AccessDecision(
                 False,
@@ -98,6 +103,73 @@ class CommandGuard:
                 "admin_only",
             )
         return AccessDecision(True)
+
+    @staticmethod
+    def group_quota_for(settings: WebUISettings, group_id: str):
+        for quota in settings.group_quotas:
+            if quota.group_id == group_id:
+                return quota
+        return None
+
+    @staticmethod
+    def consumes_user_quota(settings: WebUISettings, command_id: str, group_id: str) -> bool:
+        if command_id not in DRAWING_COMMAND_IDS or not group_id:
+            return True
+        quota = CommandGuard.group_quota_for(settings, group_id)
+        return quota.consume_user_quota if quota is not None else True
+
+    def check_group_quota(self, command_id: str, user_id: str, group_id: str) -> Optional[str]:
+        """检查群共享画画次数；群额度为 0 时无限。"""
+        if command_id not in DRAWING_COMMAND_IDS or not group_id:
+            return None
+        settings = self._settings_store.current()
+        if self.is_admin(settings, user_id):
+            return None
+        quota = self.group_quota_for(settings, group_id)
+        if quota is None or quota.limit <= 0:
+            return None
+        status = self._usage_store.check_group(
+            group_id,
+            DRAWING_QUOTA_KEY,
+            quota.limit,
+            self.quota_reset_days(settings, command_id),
+        )
+        if status.allowed:
+            return None
+        return render_guard_reply(
+            settings.guard_replies.group_quota_exceeded,
+            "群里画画",
+            format_reset_hint(status.reset_at),
+        )
+
+    def record_group_success(self, command_id: str, user_id: str, group_id: str) -> int:
+        if command_id not in DRAWING_COMMAND_IDS or not group_id:
+            return 0
+        settings = self._settings_store.current()
+        if self.is_admin(settings, user_id):
+            return 0
+        quota = self.group_quota_for(settings, group_id)
+        if quota is None or quota.limit <= 0:
+            return 0
+        return self._usage_store.record_group_success(
+            group_id,
+            DRAWING_QUOTA_KEY,
+            quota.limit,
+            self.quota_reset_days(settings, command_id),
+        )
+
+    def refund_group_task(
+        self,
+        task_id: int,
+        command_id: str,
+        group_id: str,
+        window_start: int,
+    ) -> bool:
+        if command_id not in DRAWING_COMMAND_IDS or not group_id or window_start <= 0:
+            return False
+        return self._usage_store.refund_group_once(
+            task_id, group_id, DRAWING_QUOTA_KEY, window_start
+        )
 
     def check_quota(self, command_id: str, user_id: str) -> Optional[str]:
         """检查次数；四种绘图指令共用同一个次数池。"""
@@ -115,17 +187,31 @@ class CommandGuard:
             format_reset_hint(status.reset_at),
         )
 
-    def remaining_quota(self, command_id: str, user_id: str) -> int:
-        """返回当前可用次数；-1 表示不限次数。"""
+    def remaining_quota(self, command_id: str, user_id: str, group_id: str = "") -> int:
+        """返回当前可用次数；-1 表示不限次数。群额度会和个人额度取较小值。"""
         settings = self._settings_store.current()
         if self.is_admin(settings, user_id):
             return -1
-        scope = self.quota_scope(command_id)
-        limit = self.quota_limit(settings, command_id, user_id)
-        if limit <= 0:
-            return -1
-        status = self._usage_store.check(user_id, scope, limit, self.quota_reset_days(settings, command_id))
-        return max(0, limit - status.used)
+        remaining = -1
+        if self.consumes_user_quota(settings, command_id, group_id):
+            scope = self.quota_scope(command_id)
+            limit = self.quota_limit(settings, command_id, user_id)
+            if limit > 0:
+                status = self._usage_store.check(
+                    user_id, scope, limit, self.quota_reset_days(settings, command_id)
+                )
+                remaining = max(0, limit - status.used)
+        group_quota = self.group_quota_for(settings, group_id) if group_id else None
+        if command_id in DRAWING_COMMAND_IDS and group_quota is not None and group_quota.limit > 0:
+            status = self._usage_store.check_group(
+                group_id,
+                DRAWING_QUOTA_KEY,
+                group_quota.limit,
+                self.quota_reset_days(settings, command_id),
+            )
+            group_remaining = max(0, group_quota.limit - status.used)
+            remaining = group_remaining if remaining < 0 else min(remaining, group_remaining)
+        return remaining
 
     def record_success(self, command_id: str, user_id: str) -> int:
         """只在任务成功入队后记一次，返回计数窗口起点。"""

@@ -70,6 +70,20 @@ class CommandUsageStore:
                     command_id TEXT NOT NULL,
                     refunded_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS group_usage (
+                    group_id TEXT NOT NULL,
+                    command_id TEXT NOT NULL,
+                    window_start INTEGER NOT NULL,
+                    used INTEGER NOT NULL CHECK (used >= 0),
+                    PRIMARY KEY (group_id, command_id)
+                );
+                CREATE TABLE IF NOT EXISTS group_usage_refunds (
+                    task_id INTEGER NOT NULL,
+                    group_id TEXT NOT NULL,
+                    command_id TEXT NOT NULL,
+                    refunded_at INTEGER NOT NULL,
+                    PRIMARY KEY (task_id, group_id, command_id)
+                );
                 """
             )
             connection.execute("PRAGMA user_version = 1")
@@ -180,5 +194,106 @@ class CommandUsageStore:
                     connection.execute(
                         "UPDATE command_usage SET used = used - 1 WHERE user_id = ? AND command_id = ?",
                         (user_id, command_id),
+                    )
+        return True
+
+    def check_group(
+        self,
+        group_id: str,
+        command_id: str,
+        limit: int,
+        reset_days: int,
+        now: Optional[float] = None,
+    ) -> QuotaStatus:
+        """检查组共享额度；limit <= 0 表示不限次数。"""
+        if not group_id or not command_id:
+            raise ValueError("群和指令不能为空")
+        if reset_days < 1:
+            raise ValueError("重置间隔至少为 1 天")
+        current = time.time() if now is None else now
+        if limit <= 0:
+            return QuotaStatus(True, 0, 0, 0)
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT window_start, used FROM group_usage WHERE group_id = ? AND command_id = ?",
+                (group_id, command_id),
+            ).fetchone()
+        if row is None:
+            return QuotaStatus(True, 0, limit, reset_at_for(local_midnight(current), reset_days))
+        window_start = int(row[0])
+        used = int(row[1])
+        reset_at = reset_at_for(window_start, reset_days)
+        if current >= reset_at:
+            return QuotaStatus(True, 0, limit, reset_at_for(local_midnight(current), reset_days))
+        return QuotaStatus(used < limit, used, limit, reset_at)
+
+    def record_group_success(
+        self,
+        group_id: str,
+        command_id: str,
+        limit: int,
+        reset_days: int,
+        now: Optional[float] = None,
+    ) -> int:
+        """群共享额度成功使用后记一次；返回计数窗口起点。"""
+        if limit <= 0:
+            return 0
+        if not group_id or not command_id:
+            raise ValueError("群和指令不能为空")
+        current = time.time() if now is None else now
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT window_start, used FROM group_usage WHERE group_id = ? AND command_id = ?",
+                (group_id, command_id),
+            ).fetchone()
+            if row is not None:
+                window_start = int(row[0])
+                if current < reset_at_for(window_start, reset_days):
+                    used = int(row[1]) + 1
+                else:
+                    window_start = local_midnight(current)
+                    used = 1
+            else:
+                window_start = local_midnight(current)
+                used = 1
+            connection.execute(
+                "INSERT INTO group_usage (group_id, command_id, window_start, used) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT (group_id, command_id) DO UPDATE SET window_start = excluded.window_start, used = excluded.used",
+                (group_id, command_id, window_start, used),
+            )
+        return window_start
+
+    def refund_group_once(
+        self,
+        task_id: int,
+        group_id: str,
+        command_id: str,
+        window_start: int,
+        now: Optional[float] = None,
+    ) -> bool:
+        """按任务 ID 幂等退还一次群共享额度。"""
+        if task_id < 0 or not group_id or not command_id:
+            raise ValueError("任务、群和指令不能为空")
+        current = int(time.time() if now is None else now)
+        with self._connection() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute(
+                    "INSERT INTO group_usage_refunds (task_id, group_id, command_id, refunded_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (task_id, group_id, command_id, current),
+                )
+            except sqlite3.IntegrityError:
+                return False
+            if window_start > 0:
+                row = connection.execute(
+                    "SELECT window_start, used FROM group_usage WHERE group_id = ? AND command_id = ?",
+                    (group_id, command_id),
+                ).fetchone()
+                if row is not None and int(row[0]) == window_start and int(row[1]) > 0:
+                    connection.execute(
+                        "UPDATE group_usage SET used = used - 1 WHERE group_id = ? AND command_id = ?",
+                        (group_id, command_id),
                     )
         return True

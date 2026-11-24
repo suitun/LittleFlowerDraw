@@ -51,6 +51,40 @@ class DrawingPatternTests(unittest.TestCase):
         self.assertEqual(result.role_names, ["角色A", "角色B", "角色C"])
         self.assertEqual(result.extra_prompt, "游乐园")
 
+    def test_group_template_accepts_common_role_separators(self) -> None:
+        samples = (
+            "多人穿角色A、角色B、角色C 游乐园",
+            "多人穿角色A，角色B，角色C 游乐园",
+            "多人穿角色A,角色B,角色C 游乐园",
+            "多人穿角色A+角色B+角色C 游乐园",
+            "多人穿角色A/角色B/角色C 游乐园",
+            "多人穿角色A和角色B和角色C 游乐园",
+            "多人穿角色A；角色B；角色C 游乐园",
+            "多人穿角色A;角色B;角色C 游乐园",
+        )
+        for text in samples:
+            with self.subTest(text=text):
+                result = match(text)
+                self.assertIsNotNone(result)
+                self.assertEqual(result.role_names, ["角色A", "角色B", "角色C"])
+
+    def test_free_drawing_accepts_role_list_and_extra_prompt(self) -> None:
+        templates = ["小花帮画{角色名列表} {提示词}"]
+        result = match_drawing_request(
+            "小花帮画角色A、角色B 在公园散步", [], [], [], templates
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.kind, "free")
+        self.assertEqual(result.role_names, ["角色A", "角色B"])
+        self.assertEqual(result.free_prompt, "在公园散步")
+
+        without_extra = match_drawing_request(
+            "小花帮画角色A+角色B", [], [], [], templates
+        )
+        self.assertIsNotNone(without_extra)
+        self.assertEqual(without_extra.role_names, ["角色A", "角色B"])
+        self.assertEqual(without_extra.free_prompt, "")
+
     def test_extra_prompt_is_optional(self) -> None:
         self.assertEqual(match("多人穿@角色A@角色B@角色C").extra_prompt, "")
         self.assertEqual(match("角色A角色B一起穿").extra_prompt, "")

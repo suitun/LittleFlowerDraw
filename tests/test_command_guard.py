@@ -79,6 +79,28 @@ class CommandGuardTests(unittest.TestCase):
         self.assertTrue(denied_private.silent)
         self.assertEqual(denied_private.reply, "")
 
+    def test_user_permission_exception_opens_admin_only_command(self) -> None:
+        settings = webui_settings.WebUISettings(
+            access={
+                "admin_qq": self.admin,
+                "whitelist_enabled": True,
+                "group_whitelist": ["10001"],
+                "private_whitelist": [],
+            },
+            commands={
+                "policies": [
+                    {"command": "登记角色", "permission": "仅管理员", "limit": 1, "reset_days": 1},
+                ]
+            },
+            user_permissions=[
+                {"user_id": "20001", "command": "登记角色", "note": "允许登记"}
+            ],
+        )
+        self.settings_store.save(settings)
+        self.assertTrue(self.guard.check_access("登记角色", "20001", "10001").allowed)
+        self.assertFalse(self.guard.check_access("登记角色", "20002", "10001").allowed)
+        self.assertFalse(self.guard.check_access("登记角色", "20001", "99999").allowed)
+
     def test_admin_only_command_rejects_everyone_else(self) -> None:
         self.settings()
 
@@ -135,6 +157,42 @@ class CommandGuardTests(unittest.TestCase):
         self.assertIsNone(self.guard.check_quota("单角色替换", "20001"))
         self.guard.record_success("单角色替换", "20001")
         self.assertEqual(self.guard.remaining_quota("多人替换", "20001"), 12)
+
+    def test_group_quota_is_shared_and_can_skip_user_quota(self) -> None:
+        settings = webui_settings.WebUISettings(
+            access={
+                "admin_qq": self.admin,
+                "whitelist_enabled": True,
+                "group_whitelist": ["10001"],
+                "private_whitelist": [],
+            },
+            group_quotas=[
+                {"group_id": "10001", "limit": 2, "consume_user_quota": False}
+            ],
+        )
+        self.settings_store.save(settings)
+
+        self.assertFalse(self.guard.consumes_user_quota(settings, "单角色替换", "10001"))
+        self.assertIsNone(self.guard.check_group_quota("单角色替换", "20001", "10001"))
+        self.guard.record_group_success("单角色替换", "20001", "10001")
+        self.guard.record_group_success("双角色替换", "20002", "10001")
+        denied = self.guard.check_group_quota("自由绘画", "20003", "10001")
+        self.assertIsNotNone(denied)
+        self.assertIn("群", denied)
+        self.assertEqual(self.guard.remaining_quota("自由绘画", "20003", "10001"), 0)
+
+    def test_group_quota_default_zero_is_unlimited(self) -> None:
+        settings = webui_settings.WebUISettings(
+            access={
+                "admin_qq": self.admin,
+                "whitelist_enabled": True,
+                "group_whitelist": ["10001"],
+                "private_whitelist": [],
+            }
+        )
+        self.settings_store.save(settings)
+        self.assertIsNone(self.guard.check_group_quota("自由绘画", "20001", "10001"))
+        self.assertEqual(self.guard.remaining_quota("自由绘画", "20001", "10001"), -1)
 
     def test_user_extra_quota_is_added_to_command_limit(self) -> None:
         settings = self.settings()

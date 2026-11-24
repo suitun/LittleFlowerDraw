@@ -19,6 +19,7 @@ from .role_patterns import (
     validate_drawing_error_reply,
     validate_drawing_reply,
     validate_guard_reply,
+    validate_completion_reply,
     validate_reply,
     validate_task_fail_reply,
     validate_task_reply,
@@ -83,6 +84,10 @@ class GuardReplyConfig(PluginConfigBase):
         default_factory=lambda: ["「{指令}」的次数用完啦，{重置时间}后再来找小花玩吧喵～"],
         description="次数用完时的回复，支持 {指令}、{重置时间}。",
     )
+    group_quota_exceeded: List[str] = Field(
+        default_factory=lambda: ["这个群的画画次数用完啦，{重置时间}后再来找小花玩喵～"],
+        description="群共享画画次数用完时的回复，支持 {重置时间}。",
+    )
     at_replies: List[str] = Field(default_factory=list, description="触发时 @ 回复人的权限提示类型。")
 
     @field_validator("*", mode="before")
@@ -90,7 +95,7 @@ class GuardReplyConfig(PluginConfigBase):
     def normalize_variants(cls, value: object) -> List[str]:
         return normalize_reply_variants(value)
 
-    @field_validator("admin_only", "quota_exceeded")
+    @field_validator("admin_only", "quota_exceeded", "group_quota_exceeded")
     @classmethod
     def validate_templates(cls, values: List[str]) -> List[str]:
         result = [validate_guard_reply(value) for value in values if value.strip()]
@@ -101,7 +106,7 @@ class GuardReplyConfig(PluginConfigBase):
     @field_validator("at_replies")
     @classmethod
     def validate_at_replies(cls, values: List[str]) -> List[str]:
-        allowed = {"admin_only", "quota_exceeded"}
+        allowed = {"admin_only", "quota_exceeded", "group_quota_exceeded"}
         unknown = [value for value in values if value not in allowed]
         if unknown:
             raise ValueError("未知的权限提示类型: " + "、".join(unknown))
@@ -225,6 +230,15 @@ class DrawingConfig(PluginConfigBase):
         max_length=80,
         description="有额外提示词时加在基础提示词和额外需求之间的引导语。",
     )
+    role_mapping_enabled: bool = Field(
+        default=False,
+        description="双角色/多人替换时是否追加参考图编号与角色名对应提示。",
+    )
+    role_mapping_header: str = Field(
+        default="参考图对应：",
+        max_length=200,
+        description="角色对应提示的标题；为空时只追加逐行对应关系。",
+    )
     min_group_roles: int = Field(default=3, ge=3, le=8, description="多人替换最少角色数。")
     max_group_roles: int = Field(default=8, ge=3, le=8, description="多人替换最多角色数。")
     missing_reference_reply: List[str] = Field(
@@ -238,6 +252,10 @@ class DrawingConfig(PluginConfigBase):
     group_count_reply: List[str] = Field(
         default_factory=lambda: ["多人替换需要 {最少}-{最多} 个角色喵～"],
         description="多人替换角色数量超出范围时的回复。",
+    )
+    free_role_count_reply: List[str] = Field(
+        default_factory=lambda: ["自由绘画需要 {最少}-{最多} 个角色喵～"],
+        description="自由绘画角色数量超出范围时的回复。",
     )
     api_missing_reply: List[str] = Field(
         default_factory=lambda: ["绘图 API 还没配置好，请先在「小花绘 → 绘图 API」填写 URL 和 Token 喵～"],
@@ -281,6 +299,7 @@ class DrawingConfig(PluginConfigBase):
         "missing_reference_reply",
         "missing_role_reply",
         "group_count_reply",
+        "free_role_count_reply",
         "api_missing_reply",
         "api_error_reply",
         "completion_reply",
@@ -308,6 +327,7 @@ class DrawingConfig(PluginConfigBase):
             "missing_reference_reply",
             "missing_role_reply",
             "group_count_reply",
+            "free_role_count_reply",
             "api_missing_reply",
             "api_error_reply",
             "completion_reply",
@@ -368,6 +388,11 @@ class DrawingConfig(PluginConfigBase):
     def validate_group_count(cls, values: List[str]) -> List[str]:
         return [validate_drawing_count_reply(value) for value in values if value.strip()]
 
+    @field_validator("free_role_count_reply")
+    @classmethod
+    def validate_free_role_count(cls, values: List[str]) -> List[str]:
+        return [validate_drawing_count_reply(value) for value in values if value.strip()]
+
     @field_validator("api_missing_reply")
     @classmethod
     def validate_api_missing(cls, values: List[str]) -> List[str]:
@@ -381,7 +406,7 @@ class DrawingConfig(PluginConfigBase):
     @field_validator("completion_reply")
     @classmethod
     def validate_completion(cls, values: List[str]) -> List[str]:
-        return [validate_task_reply(value) for value in values if value.strip()]
+        return [validate_completion_reply(value) for value in values if value.strip()]
 
     @field_validator("submitted_reply", "active_task_reply")
     @classmethod
@@ -419,6 +444,7 @@ class DrawingConfig(PluginConfigBase):
             "missing_reference_reply",
             "missing_role_reply",
             "group_count_reply",
+            "free_role_count_reply",
             "api_missing_reply",
             "api_error_reply",
             "completion_reply",
@@ -461,6 +487,29 @@ class UserQuota(PluginConfigBase):
         return "排行榜" if value == "小猪排行榜" else value
 
 
+class GroupQuota(PluginConfigBase):
+    """群共享的画画次数配置。"""
+
+    group_id: str = Field(..., min_length=1, max_length=64, description="群号")
+    limit: int = Field(default=0, ge=0, le=100000, description="群里画画次数上限，0 表示不限")
+    consume_user_quota: bool = Field(default=True, description="群里画画是否同时消耗用户个人次数")
+
+
+class UserPermission(PluginConfigBase):
+    """给指定 QQ 增加某项指令的访问例外。"""
+
+    user_id: str = Field(..., min_length=5, max_length=20, pattern=r"^\d{5,20}$", description="QQ 号")
+    command: str = Field(..., min_length=1, max_length=64, description="指令名称")
+    note: str = Field(default="", max_length=200, description="备注，仅用于说明")
+
+    @field_validator("command")
+    @classmethod
+    def validate_permission_command(cls, value: str) -> str:
+        if value not in COMMAND_IDS:
+            raise ValueError(f"未知指令: {value}")
+        return value
+
+
 class TaskQueueConfig(PluginConfigBase):
     max_concurrent_tasks: int = Field(default=1, ge=1, le=8, description="同时执行的绘图任务数")
     task_interval_seconds: int = Field(
@@ -489,6 +538,8 @@ class WebUISettings(PluginConfigBase):
     commands: CommandPolicyConfig = Field(default_factory=CommandPolicyConfig)
     guard_replies: GuardReplyConfig = Field(default_factory=GuardReplyConfig)
     user_quotas: List[UserQuota] = Field(default_factory=list, description="指定 QQ 的指令额外次数")
+    group_quotas: List[GroupQuota] = Field(default_factory=list, description="白名单群的画画次数")
+    user_permissions: List[UserPermission] = Field(default_factory=list, description="指定 QQ 的指令访问例外")
 
     @model_validator(mode="after")
     def validate_unique_user_quotas(self) -> "WebUISettings":
@@ -498,6 +549,17 @@ class WebUISettings(PluginConfigBase):
             if key in seen:
                 raise ValueError(f"用户 {quota.user_id} 的「{quota.command}」额外次数重复")
             seen.add(key)
+        group_ids: set[str] = set()
+        for quota in self.group_quotas:
+            if quota.group_id in group_ids:
+                raise ValueError(f"群 {quota.group_id} 的次数配置重复")
+            group_ids.add(quota.group_id)
+        permission_keys: set[tuple[str, str]] = set()
+        for permission in self.user_permissions:
+            key = (permission.user_id, permission.command)
+            if key in permission_keys:
+                raise ValueError(f"用户 {permission.user_id} 的「{permission.command}」权限例外重复")
+            permission_keys.add(key)
         return self
 
 

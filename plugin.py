@@ -24,6 +24,7 @@ from .command_usage import CommandUsageStore
 from .drawing_api import (
     DrawingApiConfig,
     DrawingApiError,
+    DrawingApiRoute,
     DrawingApiStore,
     DrawingResult,
     OpenAIImageClient,
@@ -71,12 +72,11 @@ from .role_webui import (    CACHE_DIR_NAME,
     data_url,
     detail_payload,
     list_payload,
-    render_preview,
-    render_thumbnail,
+    render_path_cached,
     thumbnail_payload,
 )
 from .settings import LittleFlowerDrawConfig
-from .webui_settings import WebUISettings, WebUISettingsStore, load_legacy_settings
+from .webui_settings import GroupQuota, WebUISettings, WebUISettingsStore, load_legacy_settings
 
 
 GLOBAL_LIBRARY_SCOPE = "global"
@@ -503,6 +503,16 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                     user_id,
                 )
                 return None
+        if candidate.kind == "free":
+            if not 1 <= len(role_names) <= 8:
+                await self._send_keyed_text(
+                    settings.drawing,
+                    "free_role_count_reply",
+                    render_drawing_count_reply(settings.drawing.free_role_count_reply, 1, 8),
+                    stream_id,
+                    user_id,
+                )
+                return None
         for role_name in role_names:
             if await asyncio.to_thread(store.get_role, GLOBAL_LIBRARY_SCOPE, role_name) is None:
                 await self._send_reply(
@@ -543,10 +553,24 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 user_id,
             )
             return False
-        denied = await asyncio.to_thread(guard.check_quota, job.command_id, user_id)
-        if denied:
-            await self._send_keyed_text(self._settings_store.current().guard_replies, "quota_exceeded", denied, stream_id, user_id)
+        group_denied = await asyncio.to_thread(
+            guard.check_group_quota, job.command_id, user_id, group_id
+        )
+        if group_denied:
+            await self._send_keyed_text(
+                settings.guard_replies,
+                "group_quota_exceeded",
+                group_denied,
+                stream_id,
+                user_id,
+            )
             return False
+        consume_user_quota = guard.consumes_user_quota(settings, job.command_id, group_id)
+        if consume_user_quota:
+            denied = await asyncio.to_thread(guard.check_quota, job.command_id, user_id)
+            if denied:
+                await self._send_keyed_text(self._settings_store.current().guard_replies, "quota_exceeded", denied, stream_id, user_id)
+                return False
         queue_config = settings.task_queue
         if queue_config.max_waiting_tasks > 0:
             if await asyncio.to_thread(task_store.count_queued) >= queue_config.max_waiting_tasks:
@@ -557,7 +581,11 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
 
         is_free = candidate.kind == "free"
         if is_free:
-            role_names = []
+            role_names = list(candidate.role_names)
+            if role_names:
+                role_names = await self._drawing_role_names(candidate, settings, stream_id, user_id)
+                if role_names is None:
+                    return False
             prompt = candidate.free_prompt.strip() or settings.drawing.fallback_prompt.strip() or "发挥创意"
         else:
             role_names = await self._drawing_role_names(candidate, settings, stream_id, user_id)
@@ -591,7 +619,14 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             )
             return False
 
-        api = await asyncio.to_thread(self._require_drawing_api_store().current)
+        api_store = self._require_drawing_api_store()
+        api = await asyncio.to_thread(
+            api_store.resolve,
+            "group" if group_id else "private",
+            group_id or user_id,
+        )
+        if api is None:
+            api = await asyncio.to_thread(api_store.current)
         if not api.configured:
             await self._send_keyed_text(
                 settings.drawing, "api_missing_reply", render_reply(settings.drawing.api_missing_reply, ""), stream_id, user_id
@@ -604,6 +639,16 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 "group": settings.drawing.group_prompt,
             }[candidate.kind]
             prompt = base_prompt.strip()
+            if (
+                candidate.kind in {"together", "group"}
+                and settings.drawing.role_mapping_enabled
+                and role_names
+            ):
+                lines = [f"图{index} = {role_name}" for index, role_name in enumerate(role_names, start=2)]
+                header = settings.drawing.role_mapping_header.strip()
+                if header:
+                    lines.insert(0, header)
+                prompt = f"{prompt}\n" + "\n".join(lines)
             if candidate.extra_prompt:
                 prefix = settings.drawing.extra_prompt_prefix.strip()
                 prompt = f"{prompt}\n{prefix}{candidate.extra_prompt}" if prefix else f"{prompt}\n{candidate.extra_prompt}"
@@ -652,11 +697,17 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                     allow_multiple=is_admin,
                 )
                 try:
-                    window = await asyncio.to_thread(guard.record_success, job.command_id, user_id)
-                    if window:
-                        await asyncio.to_thread(task_store.set_quota, task.id, window)
+                    group_window = await asyncio.to_thread(
+                        guard.record_group_success, job.command_id, user_id, group_id
+                    )
+                    if group_window:
+                        await asyncio.to_thread(task_store.set_group_quota, task.id, group_window)
+                    if consume_user_quota:
+                        window = await asyncio.to_thread(guard.record_success, job.command_id, user_id)
+                        if window:
+                            await asyncio.to_thread(task_store.set_quota, task.id, window)
                     remaining = await asyncio.to_thread(
-                        guard.remaining_quota, job.command_id, user_id
+                        guard.remaining_quota, job.command_id, user_id, group_id
                     )
                 except Exception:
                     self.ctx.logger.exception("小花绘任务次数记录失败：任务 #%s", task.id)
@@ -847,27 +898,103 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         if not api.configured:
             raise DrawingApiError("绘图 API 尚未配置")
         run_config = api.model_copy(update={"model": task.api_model, "size": task.api_size})
-        await asyncio.to_thread(task_store.set_stage, task.id, "calling_api")
-        if task.kind == "free" and not references:
-            result = await asyncio.to_thread(
-                OpenAIImageClient().generate_text, run_config, task.final_prompt
-            )
+        if task.kind == "free" and not references and not role_images:
+            request_images: List[bytes] = []
+            request_endpoint = run_config.generation_endpoint
+            request_content_type = "application/json"
         elif task.kind == "free":
-            result = await asyncio.to_thread(
-                OpenAIImageClient().generate,
-                run_config,
-                task.final_prompt,
-                references,
-            )
+            request_images = [*references, *role_images]
+            request_endpoint = run_config.endpoint
+            request_content_type = "multipart/form-data"
         else:
             if not references:
                 raise DrawingApiError("任务参考图已丢失")
-            result = await asyncio.to_thread(
-                OpenAIImageClient().generate,
-                run_config,
-                task.final_prompt,
-                [references[0], *role_images],
+            request_images = [references[0], *role_images]
+            request_endpoint = run_config.endpoint
+            request_content_type = "multipart/form-data"
+        image_info = []
+        for index, image in enumerate(request_images, start=1):
+            try:
+                with Image.open(io.BytesIO(image)) as opened:
+                    image_format = (opened.format or "").upper()
+            except (UnidentifiedImageError, OSError):
+                image_format = ""
+            extension = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}.get(image_format, "png")
+            content_type = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}[extension]
+            image_info.append(
+                {
+                    "field": "image[]" if request_content_type != "application/json" else "",
+                    "filename": f"image{index}.{extension}",
+                    "content_type": content_type,
+                    "bytes": len(image),
+                }
             )
+        request_info = {
+            "method": "POST",
+            "url": request_endpoint,
+            "content_type": request_content_type,
+            "model": task.api_model,
+            "size": task.api_size,
+            "quality": run_config.quality,
+            "complexity": run_config.complexity,
+            "output_format": "png",
+            "n": 1,
+            "timeout_seconds": run_config.timeout_seconds,
+            "profile_id": api.profile_id,
+            "profile_name": api.name,
+            "prompt_chars": len(task.final_prompt),
+            "image_count": len(request_images),
+            "images": image_info,
+        }
+        try:
+            await asyncio.to_thread(task_store.set_api_request, task.id, request_info)
+        except Exception:
+            self.ctx.logger.exception("小花绘任务 #%s 记录 API 请求信息失败", task.id)
+        await asyncio.to_thread(task_store.set_stage, task.id, "calling_api")
+        try:
+            if not request_images:
+                result = await asyncio.to_thread(
+                    OpenAIImageClient().generate_text, run_config, task.final_prompt
+                )
+            else:
+                result = await asyncio.to_thread(
+                    OpenAIImageClient().generate,
+                    run_config,
+                    task.final_prompt,
+                    request_images,
+                )
+        except DrawingApiError as error:
+            try:
+                await asyncio.to_thread(
+                    task_store.append_api_attempt,
+                    task.id,
+                    {
+                        "at": int(time.time()),
+                        "status": "failed",
+                        "status_code": error.status_code,
+                        "request": request_info,
+                        "response": error.response,
+                        "error": str(error),
+                    },
+                )
+            except Exception:
+                self.ctx.logger.exception("小花绘任务 #%s 记录失败 API 响应失败", task.id)
+            raise
+        try:
+            await asyncio.to_thread(
+                task_store.append_api_attempt,
+                task.id,
+                {
+                    "at": int(time.time()),
+                    "status": "succeeded",
+                    "status_code": 200,
+                    "request": request_info,
+                    "response": result.response,
+                    "error": "",
+                },
+            )
+        except Exception:
+            self.ctx.logger.exception("小花绘任务 #%s 记录成功 API 响应失败", task.id)
         await asyncio.to_thread(task_store.set_stage, task.id, "saving")
         path = await asyncio.to_thread(
             self._save_drawing_image,
@@ -875,7 +1002,7 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             task.kind,
             self.ctx.paths.data_dir / "drawings",
         )
-        await asyncio.to_thread(task_store.succeed, task.id, str(path))
+        await asyncio.to_thread(task_store.succeed, task.id, str(path), result.response)
         try:
             await self._send_completion(task, stream_id, result.image)
         except Exception:
@@ -900,11 +1027,17 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         if self._guard is not None:
             try:
                 remaining = await asyncio.to_thread(
-                    self._guard.remaining_quota, task.command_id, task.requester_id
+                    self._guard.remaining_quota, task.command_id, task.requester_id, task.group_id
                 )
             except Exception:
                 self.ctx.logger.exception("读取任务 #%s 剩余次数失败", task.id)
-        text = render_task_reply(template, task.id, 0, remaining)
+        text = render_task_reply(
+            template,
+            task.id,
+            0,
+            remaining,
+            max(0, int(time.time() - task.started_at)) if task.started_at else 0,
+        )
         if "{任务ID}" not in template:
             text = f"任务 #{task.id} {text}"
         segments = []
@@ -920,16 +1053,25 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             raise ReplyDeliveryError("绘图结果图片发送失败")
 
     async def _refund_task(self, task: TaskRecord) -> None:
-        if not task.quota_counted or task.quota_refunded:
+        if (not task.quota_counted and task.group_quota_window_start <= 0) or task.quota_refunded:
             return
         guard = self._guard
         task_store = self._task_store
         if guard is None or task_store is None:
             return
         try:
-            await asyncio.to_thread(
-                guard.refund_task, task.id, task.command_id, task.requester_id, task.quota_window_start
-            )
+            if task.quota_counted:
+                await asyncio.to_thread(
+                    guard.refund_task, task.id, task.command_id, task.requester_id, task.quota_window_start
+                )
+            if task.group_quota_window_start > 0:
+                await asyncio.to_thread(
+                    guard.refund_group_task,
+                    task.id,
+                    task.command_id,
+                    task.group_id,
+                    task.group_quota_window_start,
+                )
             await asyncio.to_thread(task_store.mark_refunded, task.id)
         except Exception:
             self.ctx.logger.exception("小花绘任务 #%s 退还次数失败", task.id)
@@ -1278,6 +1420,10 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             item["endpoint"] = profile.endpoint if profile.base_url else ""
             profiles.append(item)
         payload["profiles"] = profiles
+        payload["routes"] = [
+            route.model_dump(mode="json")
+            for route in await asyncio.to_thread(store.list_routes)
+        ]
         return payload
 
     @API("webui_drawing_api_save", description="保存 OpenAI 兼容绘图 API 配置", version="1")
@@ -1320,6 +1466,26 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             return {"deleted": False, "error": str(error)}
         return {"deleted": True}
 
+    @API("webui_drawing_api_routes_save", description="保存群聊和私聊的 API 指定规则", version="1")
+    async def webui_drawing_api_routes_save(self, routes_json: str) -> Dict[str, Any]:
+        try:
+            raw = json.loads(routes_json)
+            if not isinstance(raw, list):
+                raise ValueError("路由配置必须是 JSON 数组")
+            routes = [DrawingApiRoute.model_validate(item) for item in raw]
+        except (json.JSONDecodeError, ValueError) as error:
+            return {"saved": False, "error": str(error)}
+        try:
+            saved = await asyncio.to_thread(
+                self._require_drawing_api_store().save_routes, routes
+            )
+        except ValueError as error:
+            return {"saved": False, "error": str(error)}
+        return {
+            "saved": True,
+            "routes": [route.model_dump(mode="json") for route in saved],
+        }
+
     @API("webui_drawing_models", description="查询 OpenAI 兼容接口的可用模型", version="1")
     async def webui_drawing_models(self, base_url: str = "", api_key: str = "") -> Dict[str, Any]:
         try:
@@ -1356,8 +1522,18 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         store = self._require_task_store()
         tasks, total = await asyncio.to_thread(store.list_history, page, page_size, status, query)
         pages = max(1, (total + page_size - 1) // page_size)
+        payload = [self._task_summary(task) for task in tasks]
+        semaphore = asyncio.Semaphore(4)
+
+        async def add_thumbnail(item: Dict[str, Any], task: TaskRecord) -> None:
+            async with semaphore:
+                item["thumbnail"] = await self._task_thumbnail_data(task)
+
+        await asyncio.gather(
+            *(add_thumbnail(item, task) for item, task in zip(payload[:20], tasks[:20]))
+        )
         return {
-            "tasks": [self._task_summary(task) for task in tasks],
+            "tasks": payload,
             "total": total,
             "page": page,
             "pages": pages,
@@ -1377,6 +1553,9 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
                 "api_model": task.api_model,
                 "api_size": task.api_size,
                 "api_profile_id": task.api_profile_id,
+                "api_request": task.api_request,
+                "api_attempts": task.api_attempts,
+                "api_response": task.api_response,
                 "quota_counted": task.quota_counted,
                 "quota_refunded": task.quota_refunded,
                 "source_message_id": task.source_message_id,
@@ -1418,9 +1597,20 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         guard = self._guard
         if guard is None:
             raise RuntimeError("绘图权限守卫尚未初始化")
-        denied = await asyncio.to_thread(guard.check_quota, old.command_id, old.requester_id)
-        if denied:
-            return {"retried": False, "error": denied}
+        group_denied = await asyncio.to_thread(
+            guard.check_group_quota, old.command_id, old.requester_id, old.group_id
+        )
+        if group_denied:
+            return {"retried": False, "error": group_denied}
+        consume_user_quota = guard.consumes_user_quota(
+            await asyncio.to_thread(self._require_settings_store().current),
+            old.command_id,
+            old.group_id,
+        )
+        if consume_user_quota:
+            denied = await asyncio.to_thread(guard.check_quota, old.command_id, old.requester_id)
+            if denied:
+                return {"retried": False, "error": denied}
         settings = await asyncio.to_thread(self._require_settings_store().current)
         async with self._task_submit_lock:
             current = await asyncio.to_thread(store.list_current, 1000)
@@ -1442,9 +1632,15 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
             if task is None:
                 return {"retried": False, "error": "任务状态已变化，无法重试"}
             try:
-                window = await asyncio.to_thread(guard.record_success, old.command_id, old.requester_id)
-                if window:
-                    await asyncio.to_thread(store.set_quota, task.id, window)
+                group_window = await asyncio.to_thread(
+                    guard.record_group_success, old.command_id, old.requester_id, old.group_id
+                )
+                if group_window:
+                    await asyncio.to_thread(store.set_group_quota, task.id, group_window)
+                if consume_user_quota:
+                    window = await asyncio.to_thread(guard.record_success, old.command_id, old.requester_id)
+                    if window:
+                        await asyncio.to_thread(store.set_quota, task.id, window)
             except Exception:
                 self.ctx.logger.exception("小花绘重试任务次数记录失败：任务 #%s", task.id)
         self._task_wakeup.set()
@@ -1462,6 +1658,25 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         deleted = await asyncio.to_thread(self._require_task_store().delete_tasks, ids)
         return {"deleted": deleted}
 
+    async def _task_thumbnail_data(
+        self, task: TaskRecord, size: str = "card"
+    ) -> Optional[str]:
+        path_value = task.output_path if task.output_path and Path(task.output_path).is_file() else ""
+        if not path_value:
+            path_value = task.reference_path
+        if not path_value or not Path(path_value).is_file():
+            return None
+        try:
+            thumb = await asyncio.to_thread(
+                render_path_cached,
+                self._webui_cache_dir,
+                Path(path_value),
+                "preview" if size == "detail" else "thumb",
+            )
+            return data_url(thumb)
+        except Exception:
+            return None
+
     @API("webui_task_thumbnail", description="读取任务输出图或参考图的压缩预览", version="1")
     async def webui_task_thumbnail(
         self, task_id: int, kind: str = "output", size: str = "card"
@@ -1478,9 +1693,12 @@ class LittleFlowerDrawPlugin(MaiBotPlugin):
         if not path or not Path(path).is_file():
             return {"image": None, "error": "任务没有可预览的图片"}
         try:
-            data = await asyncio.to_thread(Path(path).read_bytes)
-            renderer = render_preview if size == "detail" else render_thumbnail
-            thumb = await asyncio.to_thread(renderer, data)
+            thumb = await asyncio.to_thread(
+                render_path_cached,
+                self._webui_cache_dir,
+                Path(path),
+                "preview" if size == "detail" else "thumb",
+            )
             return {"image": data_url(thumb)}
         except Exception as error:
             return {"image": None, "error": str(error)}

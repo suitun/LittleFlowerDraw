@@ -114,6 +114,13 @@
             "profile_id": {"type": "string", "required": true, "max_length": 64}
           }
         },
+        "save_drawing_api_routes": {
+          "api": "webui_drawing_api_routes_save",
+          "version": "1",
+          "parameters": {
+            "routes_json": {"type": "string", "required": true, "max_length": 65536}
+          }
+        },
         "fetch_models": {
           "api": "webui_drawing_models",
           "version": "1",

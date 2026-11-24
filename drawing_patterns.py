@@ -23,6 +23,14 @@ DRAWING_KIND_LABELS = {
 }
 
 _PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
+_ROLE_TOKEN = r"[^\s@、，,；;+/和]+"
+_ROLE_SEPARATOR = r"\s*(?:@|、|，|,|；|;|\+|/|和)\s*"
+_ROLE_LIST_PATTERN = rf"@?{_ROLE_TOKEN}(?:{_ROLE_SEPARATOR}{_ROLE_TOKEN})*"
+_ROLE_SPLIT = re.compile(_ROLE_SEPARATOR)
+
+
+def _split_role_text(value: str) -> List[str]:
+    return [part.strip() for part in _ROLE_SPLIT.split(value) if part.strip()]
 
 
 @dataclass(frozen=True)
@@ -59,6 +67,19 @@ def _split_extra(template: str) -> Tuple[str, bool]:
     return base.rstrip(), True
 
 
+def _split_free_prompt(template: str, field: str) -> Tuple[str, bool]:
+    if template.count(field) > 1:
+        raise ValueError(f"自由绘画模板只能包含一个 {field}")
+    if field not in template:
+        return template, False
+    if not template.endswith(field):
+        raise ValueError(f"{field} 必须放在模板末尾")
+    base = template[: -len(field)]
+    if not base or not base[-1].isspace():
+        raise ValueError(f"{field} 前需要一个空格")
+    return base.rstrip(), True
+
+
 def _literal(value: str) -> str:
     return "".join(r"\s*" if part.isspace() else re.escape(part) for part in re.split(r"(\s+)", value))
 
@@ -70,9 +91,23 @@ def _optional_extra(has_extra: bool) -> str:
 def _compile(template: str, kind: str) -> re.Pattern[str]:
     _, template = split_mention_requirement(template)
     if kind == "free":
+        if ROLE_LIST_FIELD in template:
+            if PROMPT_FIELD in template and EXTRA_FIELD in template:
+                raise ValueError("自由绘画模板不能同时包含 {提示词} 和 {额外提示词}")
+            prompt_field = PROMPT_FIELD if PROMPT_FIELD in template else EXTRA_FIELD if EXTRA_FIELD in template else ""
+            allowed = {"角色名列表"}
+            if prompt_field:
+                allowed.add(prompt_field[1:-1])
+            _validate_placeholders(template, allowed)
+            base, has_prompt = _split_free_prompt(template, prompt_field) if prompt_field else (template, False)
+            prefix, suffix = base.split(ROLE_LIST_FIELD)
+            prompt_suffix = r"(?:\s+(?P<prompt>.*))?" if has_prompt else ""
+            return re.compile(
+                r"\A" + _literal(prefix) + rf"(?P<roles>{_ROLE_LIST_PATTERN})" + _literal(suffix) + prompt_suffix + r"\Z"
+            )
         _validate_placeholders(template, {"提示词"})
         if template.count(PROMPT_FIELD) != 1:
-            raise ValueError("自由绘画模板必须且只能包含一个 {提示词}")
+            raise ValueError("自由绘画模板必须包含一个 {提示词} 或 {角色名列表}")
         prefix, suffix = template.split(PROMPT_FIELD)
         return re.compile(
             r"\A" + _literal(prefix) + r"(?P<prompt>.*?)" + _literal(suffix) + r"\Z",
@@ -104,7 +139,7 @@ def _compile(template: str, kind: str) -> re.Pattern[str]:
         base, has_extra = _split_extra(template)
         prefix, suffix = base.split(ROLE_LIST_FIELD)
         return re.compile(
-            r"\A" + _literal(prefix) + r"(?P<roles>(?:@\S+)+)" + _literal(suffix) + _optional_extra(has_extra) + r"\Z"
+            r"\A" + _literal(prefix) + rf"(?P<roles>{_ROLE_LIST_PATTERN})" + _literal(suffix) + _optional_extra(has_extra) + r"\Z"
         )
 
     raise ValueError(f"未知绘图类型: {kind}")
@@ -120,6 +155,16 @@ def validate_templates(templates: List[str], kind: str) -> None:
 def _candidate(match: re.Match[str], kind: str) -> DrawingCandidate:
     extra = (match.groupdict().get("extra") or "").strip()
     if kind == "free":
+        roles_text = (match.groupdict().get("roles") or "").strip()
+        if roles_text:
+            free_prompt = (match.groupdict().get("prompt") or "").strip()
+            return DrawingCandidate(
+                "free",
+                _split_role_text(roles_text),
+                roles_text,
+                "",
+                free_prompt=free_prompt,
+            )
         return DrawingCandidate(
             "free", [], "", "", free_prompt=match.group("prompt").strip()
         )
@@ -127,8 +172,7 @@ def _candidate(match: re.Match[str], kind: str) -> DrawingCandidate:
         return DrawingCandidate(kind, [match.group("role").strip()], "", extra)
     roles_text = match.group("roles").strip()
     if kind == "group":
-        names = [part.strip() for part in roles_text.split("@") if part.strip()]
-        return DrawingCandidate(kind, names, roles_text, extra)
+        return DrawingCandidate(kind, _split_role_text(roles_text), roles_text, extra)
     return DrawingCandidate(kind, [], roles_text, extra)
 
 

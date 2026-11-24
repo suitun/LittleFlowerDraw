@@ -661,6 +661,64 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generate.call_args.args[2], [red, blue])
         self.assertEqual(self.rpc.images, [generated])
 
+    async def test_group_quota_blocks_after_group_limit_and_skips_user_quota(self) -> None:
+        self.set_drawing_api()
+        settings = self.plugin._settings_store.current()
+        settings.group_quotas = [
+            PLUGIN_MODULE.GroupQuota(group_id="10001", limit=1, consume_user_quota=False)
+        ]
+        self.plugin._settings_store.save(settings)
+        generated = png("orange")
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate_text",
+            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
+        ), patch.object(
+            PLUGIN_MODULE.LittleFlowerDrawPlugin,
+            "_save_drawing_image",
+            return_value=Path(self.temporary.name) / "group.png",
+        ):
+            self.clear_output()
+            await self.submit(self.message("小花画"))
+            task = await self.current_task()
+            await self.wait_task(task.id)
+            self.clear_output()
+            await self.submit(self.message("小花画"))
+
+        self.assertTrue(any("群" in text for text in self.rpc.texts))
+        self.assertEqual(self.plugin._task_store.count_queued(), 0)
+
+    async def test_role_mapping_prompt_is_optional_and_ordered(self) -> None:
+        reference = png("white")
+        for name in ("角色1", "角色2"):
+            await self.submit(self.message(f"小花小花这是 {name}", [png("red")]))
+        self.set_drawing_api()
+        settings = self.plugin._settings_store.current()
+        settings.drawing.role_mapping_enabled = True
+        settings.drawing.role_mapping_header = "参考图对应："
+        self.plugin._settings_store.save(settings)
+        generated = png("blue")
+
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate",
+            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
+        ), patch.object(
+            PLUGIN_MODULE.LittleFlowerDrawPlugin,
+            "_save_drawing_image",
+            return_value=Path(self.temporary.name) / "mapped.png",
+        ):
+            self.clear_output()
+            await self.submit(self.message("角色1角色2一起穿 同框", [reference]))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+
+        self.assertEqual(finished.status, "succeeded")
+        self.assertIn(
+            f"参考图对应：\n图2 = 角色1\n图3 = 角色2\n{settings.drawing.extra_prompt_prefix}同框",
+            finished.final_prompt,
+        )
+
     async def test_webui_drawing_models_queries_configured_endpoint(self) -> None:
         with patch.object(PLUGIN_MODULE, "fetch_models", return_value=["gpt-image-1", "flux-image"]):
             result = await self.plugin.webui_drawing_models("https://relay.test/v1", "secret")
@@ -780,6 +838,74 @@ class PluginIntegrationTests(unittest.IsolatedAsyncioTestCase):
         deleted = await self.plugin.webui_task_delete(json.dumps([first.id]))
         self.assertEqual(deleted["deleted"], 1)
         self.assertEqual((await self.plugin.webui_task_history())["total"], 0)
+
+    async def test_group_api_route_selects_profile_for_task(self) -> None:
+        await self.submit(self.message("小花小花这是 路由角色", [png("red")]))
+        self.set_drawing_api()
+        self.plugin._drawing_api_store.save_profile(
+            PLUGIN_MODULE.DrawingApiConfig(
+                profile_id="group-api",
+                name="群专用",
+                base_url="https://group.test/v1",
+                api_key="group-key",
+                model="gpt-image-2.6-sunburst",
+            )
+        )
+        self.plugin._drawing_api_store.save_routes(
+            [
+                PLUGIN_MODULE.DrawingApiRoute(
+                    scope="group", target_id="10001", profile_id="group-api"
+                )
+            ]
+        )
+        generated = png("blue")
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate",
+            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
+        ), patch.object(
+            PLUGIN_MODULE.LittleFlowerDrawPlugin,
+            "_save_drawing_image",
+            return_value=Path(self.temporary.name) / "routed.png",
+        ):
+            self.clear_output()
+            await self.submit(self.message("变路由角色 测试", [png("white")]))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+
+        self.assertEqual(finished.status, "succeeded")
+        self.assertEqual(finished.api_profile_id, "group-api")
+        self.assertEqual(finished.api_model, "gpt-image-2.6-sunburst")
+
+    async def test_free_drawing_uses_role_library_images_and_extra_prompt(self) -> None:
+        role_a = png("red")
+        role_b = png("blue")
+        await self.submit(self.message("小花小花这是 角色A", [role_a]))
+        await self.submit(self.message("小花小花这是 角色B", [role_b]))
+        settings = self.plugin._settings_store.current()
+        settings.drawing.free_templates = ["小花帮画{角色名列表} {提示词}"]
+        self.plugin._settings_store.save(settings)
+        self.set_drawing_api()
+        generated = png("green")
+        with patch.object(
+            PLUGIN_MODULE.OpenAIImageClient,
+            "generate",
+            return_value=PLUGIN_MODULE.DrawingResult(generated, "prompt"),
+        ) as generate, patch.object(
+            PLUGIN_MODULE.LittleFlowerDrawPlugin,
+            "_save_drawing_image",
+            return_value=Path(self.temporary.name) / "free-roles.png",
+        ):
+            self.clear_output()
+            await self.submit(self.message("小花帮画角色A、角色B 在公园散步", []))
+            task = await self.current_task()
+            finished = await self.wait_task(task.id)
+
+        self.assertEqual(finished.status, "succeeded")
+        self.assertEqual(finished.kind, "free")
+        self.assertEqual(finished.role_names, ["角色A", "角色B"])
+        self.assertEqual(finished.final_prompt, "在公园散步")
+        self.assertEqual(generate.call_args.args[2], [role_a, role_b])
 
     async def test_one_active_task_per_user_blocks_second_submission(self) -> None:
         reference = png("white")

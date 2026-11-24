@@ -19,6 +19,7 @@ DRAWING_FIELDS = {"类型", "角色数量"}
 DRAWING_COUNT_FIELDS = {"最少", "最多"}
 DRAWING_ERROR_FIELDS = {"错误"}
 TASK_FIELDS = {"任务ID", "排队数", "剩余次数"}
+COMPLETION_TASK_FIELDS = TASK_FIELDS | {"用时"}
 TASK_FAIL_FIELDS = {"任务ID", "错误"}
 IMAGE_REASON_FIELDS = {"原因"}
 IMAGE_SIZE_FIELDS = {"实际大小", "大小限制"}
@@ -209,6 +210,10 @@ def validate_task_reply(template: str) -> str:
     return _validate_template_fields(template, TASK_FIELDS, "任务提示仅支持 {任务ID}、{排队数}、{剩余次数}，不支持格式化指令")
 
 
+def validate_completion_reply(template: str) -> str:
+    return _validate_template_fields(template, COMPLETION_TASK_FIELDS, "完成提示仅支持 {任务ID}、{剩余次数}、{用时}，不支持格式化指令")
+
+
 def validate_task_fail_reply(template: str) -> str:
     return _validate_template_fields(template, TASK_FAIL_FIELDS, "任务失败提示仅支持 {任务ID}、{错误}，不支持格式化指令")
 
@@ -254,11 +259,13 @@ def render_task_reply(
     task_id: int,
     queue_count: int = 0,
     remaining: Optional[int] = None,
+    elapsed_seconds: Optional[int] = None,
 ) -> str:
     unlimited = remaining is None or remaining < 0 or remaining > 1000
     remaining_text = "不限" if unlimited else str(remaining)
+    elapsed_text = "0s" if elapsed_seconds is None else f"{max(0, elapsed_seconds)}s"
     return pick_reply(template).format_map(
-        {"任务ID": task_id, "排队数": queue_count, "剩余次数": remaining_text}
+        {"任务ID": task_id, "排队数": queue_count, "剩余次数": remaining_text, "用时": elapsed_text}
     )
 
 

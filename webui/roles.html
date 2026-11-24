@@ -35,6 +35,25 @@
     .user-quota-qq { font-weight: 600; font-variant-numeric: tabular-nums; }
     .user-quota-detail { color: var(--maibot-muted); font-size: 12.5px; }
     .user-quota-row .actions { margin-left: auto; }
+    .group-quota-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .group-quota-controls label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--maibot-muted); }
+    .group-quota-controls input[type="number"] { width: 110px; }
+    .group-quota-controls input[type="checkbox"] { width: 18px; height: 18px; }
+    .api-route-row {
+      display: grid;
+      grid-template-columns: minmax(110px, 0.7fr) 90px minmax(120px, 0.8fr) minmax(260px, 1.6fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border: 1px solid var(--maibot-border);
+      border-radius: var(--maibot-radius);
+      background: var(--maibot-surface);
+    }
+    .api-route-row .maibot-input, .api-route-row .select-combobox { width: 100%; min-width: 0; }
+    .api-route-row .maibot-button { white-space: nowrap; }
+    @media (max-width: 900px) {
+      .api-route-row { grid-template-columns: 1fr 1fr; }
+    }
     .settings-card legend { padding: 0 6px; font-weight: 600; }
     .settings-field { display: grid; gap: 6px; margin: 10px 0; font-size: 14px; }
     .settings-inline { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
@@ -113,6 +132,7 @@
     .task-detail-value { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.55; }
     .task-detail-prompt { border-top: 1px solid var(--maibot-border); padding-top: 10px; }
     .task-detail-prompt summary { cursor: pointer; color: var(--maibot-muted); font-size: 12.5px; }
+    .task-api-attempt { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--maibot-border); }
     .task-detail-reference { display: grid; gap: 6px; justify-items: center; }
     .task-detail-reference img { width: 100%; height: auto; max-height: 380px; object-fit: contain; border: 1px solid var(--maibot-border); border-radius: 8px; background: var(--maibot-background); }
     @media (max-width: 900px) {
@@ -200,7 +220,7 @@
   <nav class="module-nav" aria-label="小花绘模块">
     <button type="button" data-module="settings" class="active">插件设置</button>
     <button type="button" data-module="replies">回复配置</button>
-    <button type="button" data-module="users">用户管理</button>
+    <button type="button" data-module="users">次数管理</button>
     <button type="button" data-module="roles">角色库</button>
     <button type="button" data-module="draw">当前任务</button>
     <button type="button" data-module="history">任务历史</button>
@@ -285,10 +305,10 @@
             <textarea id="setting-drawing-group-templates" class="maibot-input" rows="3" placeholder="多人穿{角色名列表} {额外提示词}"></textarea>
           </label>
           <label class="settings-field">自由绘画模板（每行一条）
-            <textarea id="setting-drawing-free-templates" class="maibot-input" rows="3" placeholder="小花画{提示词}"></textarea>
+            <textarea id="setting-drawing-free-templates" class="maibot-input" rows="3" placeholder="小花画{提示词}&#10;小花帮画{角色名列表} {提示词}"></textarea>
           </label>
         </div>
-        <p class="muted">多人替换用 @ 分隔角色，例如 <code>多人穿@角色1@角色2@角色3 换装</code>；自由绘画不依赖角色库，可以不带参考图，也可以带多张图或引用一条多图消息，图片按发送顺序使用。模板开头加 <code>@</code> 表示必须先 @ 机器人，例如 <code>@变{角色名} {额外提示词}</code>。</p>
+        <p class="muted">多人替换和自由绘画的角色列表支持 <code>@</code>、<code>、</code>、<code>，</code>、逗号、<code>；</code>、<code>;</code>、<code>+</code>、<code>/</code>、<code>和</code> 分隔，不支持空格分隔。自由绘画模板带 <code>{提示词}</code> 时，角色列表后的空格就是提示词开头。自由绘画不依赖角色库的模板可以不带参考图；使用 <code>{角色名列表}</code> 时会从角色库读取 1-8 个角色图作为参考。图片按发送顺序使用，也可以带多张图或引用一条多图消息。模板开头加 <code>@</code> 表示必须先 @ 机器人。</p>
         <div class="settings-grid">
           <label class="settings-field">单角色基础提示词
             <textarea id="setting-drawing-replace-prompt" class="maibot-input" rows="3"></textarea>
@@ -305,6 +325,13 @@
           <label class="settings-field">额外提示词引导语
             <input id="setting-drawing-extra-prefix" class="maibot-input" placeholder="注意用户额外需求：">
           </label>
+          <label class="settings-field">角色对应提示头
+            <input id="setting-drawing-role-mapping-header" class="maibot-input" placeholder="参考图对应：">
+          </label>
+        </div>
+        <div class="settings-inline">
+          <input id="setting-drawing-role-mapping" type="checkbox">
+          <label for="setting-drawing-role-mapping">双角色/多人替换时追加「图2 = 角色名」对应提示</label>
         </div>
         <p class="muted">提示词必须明确图1是底图、后续图片只是角色外观参考。参考图是头像或表情包时，建议「绘图 API → 尺寸」选 <code>reference</code>，避免输出被角色立绘的比例带偏。</p>
         <div class="settings-grid">
@@ -324,9 +351,6 @@
           <label class="settings-field">历史保留天数（0=不清理）<input id="setting-queue-history-days" class="maibot-input" type="number" min="0" max="3650"></label>
           <label class="settings-field">输出图片保留天数（0=不清理）<input id="setting-queue-output-days" class="maibot-input" type="number" min="0" max="3650"></label>
         </div>
-        <label class="settings-inline">
-          <input id="setting-queue-paused" type="checkbox"> 暂停领取新任务（当前任务继续完成）
-        </label>
       </fieldset>
 
       <fieldset class="settings-card">
@@ -364,8 +388,8 @@
   <section id="module-users" class="module" hidden>
     <div class="module-head">
       <div>
-        <h2>用户管理</h2>
-        <p class="muted">给指定 QQ 增加某项指令的额外次数；额外次数叠加在指令基础次数上，用完基础额度后继续使用。</p>
+        <h2>次数管理</h2>
+        <p class="muted">给指定 QQ 增加某项指令的额外次数，或为白名单群配置共享的画画次数。</p>
       </div>
     </div>
     <div class="settings-card">
@@ -392,6 +416,40 @@
       </div>
     </div>
     <div id="user-quota-list" class="user-quota-list"></div>
+
+    <fieldset class="settings-card">
+      <legend>指定 QQ 指令权限</legend>
+      <p class="muted">给个别 QQ 开放「仅管理员」指令；白名单仍然优先，管理员不受影响。</p>
+      <div class="settings-grid">
+        <label class="settings-field">QQ 号
+          <input id="permission-user-id" class="maibot-input" inputmode="numeric" placeholder="例如 2685275264">
+        </label>
+        <label class="settings-field">指令
+          <select id="permission-command" class="maibot-select"></select>
+        </label>
+        <label class="settings-field">备注（可选）
+          <input id="permission-note" class="maibot-input" type="text" maxlength="200" placeholder="例如：帮忙登记">
+        </label>
+      </div>
+      <div class="settings-footer">
+        <p id="permission-status" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button id="permission-reset" class="maibot-button" type="button">清空</button>
+          <button id="permission-save" class="maibot-button maibot-button-primary" type="button">添加权限</button>
+        </div>
+      </div>
+      <div id="permission-list" class="user-quota-list"></div>
+    </fieldset>
+
+    <fieldset class="settings-card">
+      <legend>群里画画次数</legend>
+      <p class="muted">从群聊白名单读取群；0 表示不限次数。关闭「消耗用户次数」后，该群画画只消耗群里次数，不扣个人次数。</p>
+      <div id="group-quota-list" class="user-quota-list"></div>
+      <div class="settings-footer">
+        <p id="group-quota-status" role="status" aria-live="polite"></p>
+        <button id="group-quota-save" class="maibot-button maibot-button-primary" type="button">保存群里次数</button>
+      </div>
+    </fieldset>
   </section>
 
   <section id="module-migration" class="module" hidden>
@@ -448,6 +506,9 @@
       </div>
     </div>
     <p id="current-stats" class="muted">正在加载…</p>
+    <label class="settings-inline">
+      <input id="current-queue-paused" type="checkbox"> 暂停领取新任务（当前任务继续完成）
+    </label>
     <p id="current-status" role="status" aria-live="polite"></p>
     <div id="current-list" class="task-list"></div>
     <nav id="current-pager" class="pager" hidden>
@@ -536,13 +597,44 @@
             <div id="api-size-menu" class="model-menu" role="listbox" hidden></div>
           </div>
         </label>
+        <label class="settings-field">质量
+          <select id="api-quality" class="maibot-select">
+            <option value="auto">auto（自动）</option>
+            <option value="low">low（草稿）</option>
+            <option value="medium">medium（中等）</option>
+            <option value="high">high（高质量）</option>
+            <option value="xhigh">xhigh（极高）</option>
+            <option value="max">max（最高）</option>
+          </select>
+        </label>
+        <label class="settings-field">复杂度
+          <select id="api-complexity" class="maibot-select">
+            <option value="auto">auto（不发送，使用模型默认）</option>
+            <option value="low">low（更少规划）</option>
+            <option value="medium">medium（中等）</option>
+            <option value="high">high（更多规划）</option>
+          </select>
+        </label>
         <label class="settings-field">超时秒数<input id="api-timeout" class="maibot-input" type="number" min="30" max="600"></label>
       </div>
-      <p class="muted">尺寸可填 auto、reference（按参考图比例选最近的官方尺寸），或 256-2048 边长、最多 400 万像素的自定义尺寸。模型可向接口的 <code>/v1/models</code> 查询，查不到时也可以手动填写。</p>
+      <p class="muted">尺寸可填 auto、reference（按参考图比例选最近的官方尺寸），或符合官方约束的自定义尺寸：单边不超过 3840、宽高为 16 的倍数、长短边比例不超过 3:1、总像素 655360-8294400。输出格式固定为 PNG。模型可向接口的 <code>/v1/models</code> 查询，查不到时也可以手动填写。</p>
       <p id="api-endpoint" class="muted"></p>
       <div class="settings-footer">
         <p id="api-status" role="status" aria-live="polite"></p>
         <button id="api-save" class="maibot-button maibot-button-primary" type="button">保存配置</button>
+      </div>
+    </fieldset>
+
+    <fieldset class="settings-card">
+      <legend>按群/私聊指定 API</legend>
+      <p class="muted">群聊按群号，私聊按 QQ 号匹配；没有匹配的会话使用上面的当前 API。</p>
+      <div id="api-route-list" class="user-quota-list"></div>
+      <div class="settings-footer">
+        <p id="api-route-status" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button id="api-route-add" class="maibot-button" type="button">新增规则</button>
+          <button id="api-route-save" class="maibot-button maibot-button-primary" type="button">保存规则</button>
+        </div>
       </div>
     </fieldset>
   </section>
@@ -597,20 +689,25 @@
   let settingsLoaded = false;
   let settingsData = null;
   let userQuotaEditIndex = -1;
+  let permissionEditIndex = -1;
   let apiLoaded = false;
   let apiModels = [];
   let apiProfiles = [];
+  let apiRoutes = [];
   let apiActiveId = "";
   let apiSelectedId = "";
   let currentTasksLoading = false;
   let currentTasksPage = 1;
   let currentTasksPages = 1;
   let currentTasksData = [];
+  let queuePauseRevision = 0;
   const CURRENT_PAGE_SIZE = 12;
   let confirmResolver = null;
   let retryApiResolver = null;
   let historyPage = 1;
   let historyPages = 1;
+  let historyTotal = 0;
+  let historyRequestId = 0;
   let historySearchTimer = 0;
   const historySelected = new Set();
   const SIZE_OPTIONS = [
@@ -618,7 +715,11 @@
     {value: "reference", label: "reference（跟随参考图比例）"},
     {value: "1024x1024", label: "1024x1024（方形）"},
     {value: "1536x1024", label: "1536x1024（横向）"},
-    {value: "1024x1536", label: "1024x1536（纵向）"}
+    {value: "1024x1536", label: "1024x1536（纵向）"},
+    {value: "2048x2048", label: "2048x2048（2K 方形）"},
+    {value: "2048x1152", label: "2048x1152（2K 横向）"},
+    {value: "3840x2160", label: "3840x2160（4K 横向）"},
+    {value: "2160x3840", label: "2160x3840（4K 纵向）"}
   ];
 
   function make(tag, className, text) {
@@ -695,6 +796,14 @@
   }, { rootMargin: "200px" });
 
   const taskThumbnailCache = new Map();
+  const TASK_THUMBNAIL_CACHE_LIMIT = 200;
+  function cacheTaskThumbnail(key, value) {
+    if (taskThumbnailCache.has(key)) taskThumbnailCache.delete(key);
+    taskThumbnailCache.set(key, value);
+    while (taskThumbnailCache.size > TASK_THUMBNAIL_CACHE_LIMIT) {
+      taskThumbnailCache.delete(taskThumbnailCache.keys().next().value);
+    }
+  }
   const taskThumbnailObserver = new IntersectionObserver(entries => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
@@ -714,7 +823,7 @@
     try {
       const result = await request("query", "task_thumbnail", { task_id: Number(taskId), kind });
       if (!result.image) throw new Error(result.error || "预览不可用");
-      taskThumbnailCache.set(key, result.image);
+      cacheTaskThumbnail(key, result.image);
       image.src = result.image;
     } catch (error) {
       const cover = image.closest(".task-cover");
@@ -1245,8 +1354,14 @@
     });
     box.addEventListener("click", event => event.stopPropagation());
     select.addEventListener("change", () => refreshSelectCombo(select));
-    document.addEventListener("click", () => close());
     refreshSelectCombo(select);
+  }
+
+  function closeAllSelectMenus() {
+    for (const menu of document.querySelectorAll(".select-menu")) menu.hidden = true;
+    for (const input of document.querySelectorAll(".select-display")) {
+      input.setAttribute("aria-expanded", "false");
+    }
   }
 
   function renderPolicies(policies) {
@@ -1364,6 +1479,85 @@
     });
   }
 
+  function setGroupQuotaStatus(message, isError = false) {
+    const status = document.querySelector("#group-quota-status");
+    status.textContent = message || "";
+    status.className = isError ? "error" : "";
+  }
+
+  function renderGroupQuotas(settings) {
+    const list = document.querySelector("#group-quota-list");
+    list.replaceChildren();
+    const groups = settings.access.group_whitelist || [];
+    const configured = new Map((settings.group_quotas || []).map(item => [item.group_id, item]));
+    if (!groups.length) {
+      list.append(make("div", "placeholder", "群聊白名单还没有群喵～先在「插件设置」里加入白名单群。"));
+      return;
+    }
+    for (const groupId of groups) {
+      const quota = configured.get(groupId) || {group_id: groupId, limit: 0, consume_user_quota: true};
+      const row = make("div", "user-quota-row");
+      row.dataset.groupId = groupId;
+      const main = make("div", "user-quota-main");
+      main.append(make("div", "user-quota-qq", `群 ${groupId}`));
+      main.append(make("div", "user-quota-detail", "群聊白名单"));
+      const controls = make("div", "group-quota-controls");
+      const limitLabel = make("label", "", "群里次数");
+      const limitInput = make("input", "maibot-input");
+      limitInput.type = "number";
+      limitInput.min = "0";
+      limitInput.max = "100000";
+      limitInput.value = String(quota.limit);
+      limitInput.dataset.role = "limit";
+      limitLabel.append(limitInput);
+      const consumeLabel = make("label", "", "");
+      const consume = make("input");
+      consume.type = "checkbox";
+      consume.checked = quota.consume_user_quota !== false;
+      consume.dataset.role = "consume";
+      consumeLabel.append(consume, document.createTextNode("消耗用户次数"));
+      controls.append(limitLabel, consumeLabel);
+      row.append(main, controls);
+      list.append(row);
+    }
+  }
+
+  async function persistGroupQuotas(quotas) {
+    if (!settingsData) await loadSettings();
+    const next = structuredClone(settingsData);
+    next.group_quotas = quotas;
+    const result = await request("action", "save_settings", {settings_json: JSON.stringify(next)});
+    if (result && result.error) throw new Error(result.error);
+    settingsData = next;
+    settingsLoaded = false;
+    await loadSettings();
+  }
+
+  async function saveGroupQuotas() {
+    const rows = [...document.querySelectorAll("#group-quota-list [data-group-id]")];
+    const quotas = [];
+    for (const row of rows) {
+      const groupId = row.dataset.groupId;
+      const limit = Number(row.querySelector('[data-role="limit"]').value);
+      const consume = row.querySelector('[data-role="consume"]').checked;
+      if (!Number.isInteger(limit) || limit < 0 || limit > 100000) {
+        setGroupQuotaStatus(`群 ${groupId} 的次数必须是 0-100000 的整数`, true);
+        return;
+      }
+      quotas.push({group_id: groupId, limit, consume_user_quota: consume});
+    }
+    const button = document.querySelector("#group-quota-save");
+    button.disabled = true;
+    try {
+      await persistGroupQuotas(quotas);
+      setGroupQuotaStatus("群里次数已保存，新请求立即生效");
+    } catch (error) {
+      setGroupQuotaStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function persistUserQuotas(quotas) {
     if (!settingsData) await loadSettings();
     const next = structuredClone(settingsData);
@@ -1426,6 +1620,131 @@
       setUserQuotaStatus("用户额度已删除");
     } catch (error) {
       setUserQuotaStatus(error.message || String(error), true);
+    }
+  }
+
+  function setPermissionStatus(message, isError = false) {
+    const status = document.querySelector("#permission-status");
+    status.textContent = message || "";
+    status.className = isError ? "error" : "";
+  }
+
+  function resetPermissionForm() {
+    permissionEditIndex = -1;
+    document.querySelector("#permission-user-id").value = "";
+    document.querySelector("#permission-note").value = "";
+    document.querySelector("#permission-save").textContent = "添加权限";
+    setPermissionStatus("");
+  }
+
+  function renderPermissions(settings) {
+    const select = document.querySelector("#permission-command");
+    const selected = select.value;
+    select.replaceChildren();
+    for (const policy of settings.commands.policies || []) {
+      const option = make("option", "", policy.command);
+      option.value = policy.command;
+      select.append(option);
+    }
+    if (selected) select.value = selected;
+    enhanceSelect(select);
+
+    const list = document.querySelector("#permission-list");
+    list.replaceChildren();
+    const permissions = settings.user_permissions || [];
+    if (!permissions.length) {
+      list.append(make("div", "placeholder", "还没有指定 QQ 的权限例外喵～"));
+      return;
+    }
+    permissions.slice().sort((a, b) => a.user_id.localeCompare(b.user_id) || a.command.localeCompare(b.command)).forEach(permission => {
+      const index = permissions.indexOf(permission);
+      const row = make("div", "user-quota-row");
+      const main = make("div", "user-quota-main");
+      main.append(make("div", "user-quota-qq", `QQ ${permission.user_id}`));
+      main.append(make("div", "user-quota-detail", `${permission.command}：允许使用`));
+      if (permission.note) main.append(make("div", "user-quota-detail", `备注：${permission.note}`));
+      row.append(main);
+      const actions = make("div", "actions");
+      const edit = make("button", "maibot-button", "编辑");
+      const remove = make("button", "maibot-button task-delete", "删除");
+      edit.type = "button";
+      remove.type = "button";
+      edit.addEventListener("click", () => {
+        permissionEditIndex = index;
+        document.querySelector("#permission-user-id").value = permission.user_id;
+        document.querySelector("#permission-command").value = permission.command;
+        document.querySelector("#permission-note").value = permission.note || "";
+        document.querySelector("#permission-save").textContent = "保存修改";
+        setPermissionStatus(`正在编辑 QQ ${permission.user_id} 的「${permission.command}」`);
+      });
+      remove.addEventListener("click", () => void deletePermission(index));
+      actions.append(edit, remove);
+      row.append(actions);
+      list.append(row);
+    });
+  }
+
+  async function persistPermissions(permissions) {
+    if (!settingsData) await loadSettings();
+    const next = structuredClone(settingsData);
+    next.user_permissions = permissions;
+    const result = await request("action", "save_settings", {settings_json: JSON.stringify(next)});
+    if (result && result.error) throw new Error(result.error);
+    settingsData = next;
+    settingsLoaded = false;
+    await loadSettings();
+  }
+
+  async function savePermission() {
+    const qq = document.querySelector("#permission-user-id").value.trim();
+    const command = document.querySelector("#permission-command").value;
+    if (!/^\d{5,20}$/.test(qq)) {
+      setPermissionStatus("QQ 号必须是 5-20 位数字", true);
+      return;
+    }
+    if (!command) {
+      setPermissionStatus("请选择指令", true);
+      return;
+    }
+    if (!settingsData) await loadSettings();
+    const note = document.querySelector("#permission-note").value.trim();
+    const permissions = (settingsData.user_permissions || []).map(item => ({...item}));
+    if (permissionEditIndex >= 0) {
+      permissions[permissionEditIndex] = {user_id: qq, command, note};
+    } else {
+      permissions.push({user_id: qq, command, note});
+    }
+    const seen = new Set();
+    for (const permission of permissions) {
+      const key = `${permission.user_id}\n${permission.command}`;
+      if (seen.has(key)) {
+        setPermissionStatus("这个 QQ 已经配置过该指令的权限例外", true);
+        return;
+      }
+      seen.add(key);
+    }
+    const button = document.querySelector("#permission-save");
+    button.disabled = true;
+    try {
+      await persistPermissions(permissions);
+      resetPermissionForm();
+      setPermissionStatus("权限例外已保存，新请求立即生效");
+    } catch (error) {
+      setPermissionStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function deletePermission(index) {
+    if (!await confirmAction("确认删除这条权限例外？")) return;
+    const permissions = (settingsData.user_permissions || []).filter((_, itemIndex) => itemIndex !== index);
+    try {
+      await persistPermissions(permissions);
+      resetPermissionForm();
+      setPermissionStatus("权限例外已删除");
+    } catch (error) {
+      setPermissionStatus(error.message || String(error), true);
     }
   }
 
@@ -1543,6 +1862,8 @@
     document.querySelector("#setting-drawing-group-prompt").value = settings.drawing.group_prompt;
     document.querySelector("#setting-drawing-fallback-prompt").value = settings.drawing.fallback_prompt;
     document.querySelector("#setting-drawing-extra-prefix").value = settings.drawing.extra_prompt_prefix;
+    document.querySelector("#setting-drawing-role-mapping").checked = settings.drawing.role_mapping_enabled === true;
+    document.querySelector("#setting-drawing-role-mapping-header").value = settings.drawing.role_mapping_header || "";
     document.querySelector("#setting-drawing-min-roles").value = String(settings.drawing.min_group_roles);
     document.querySelector("#setting-drawing-max-roles").value = String(settings.drawing.max_group_roles);
     document.querySelector("#setting-queue-concurrent").value = String(settings.task_queue.max_concurrent_tasks);
@@ -1552,13 +1873,14 @@
     document.querySelector("#setting-queue-poll").value = String(settings.task_queue.poll_interval_seconds);
     document.querySelector("#setting-queue-history-days").value = String(settings.task_queue.history_retention_days);
     document.querySelector("#setting-queue-output-days").value = String(settings.task_queue.output_retention_days);
-    document.querySelector("#setting-queue-paused").checked = settings.task_queue.queue_paused;
     document.querySelector("#setting-admin").value = settings.access.admin_qq;
     document.querySelector("#setting-whitelist").checked = settings.access.whitelist_enabled;
     document.querySelector("#setting-groups").value = settings.access.group_whitelist.join("\n");
     document.querySelector("#setting-private").value = settings.access.private_whitelist.join("\n");
     renderPolicies(settings.commands.policies);
     renderUserQuotas(settings);
+    renderGroupQuotas(settings);
+    renderPermissions(settings);
   }
 
   function collectPolicies() {
@@ -1608,6 +1930,8 @@
         group_prompt: document.querySelector("#setting-drawing-group-prompt").value,
         fallback_prompt: document.querySelector("#setting-drawing-fallback-prompt").value,
         extra_prompt_prefix: document.querySelector("#setting-drawing-extra-prefix").value,
+        role_mapping_enabled: document.querySelector("#setting-drawing-role-mapping").checked,
+        role_mapping_header: document.querySelector("#setting-drawing-role-mapping-header").value,
         min_group_roles: Number(document.querySelector("#setting-drawing-min-roles").value),
         max_group_roles: Number(document.querySelector("#setting-drawing-max-roles").value)
       },
@@ -1618,8 +1942,7 @@
         task_timeout_seconds: Number(document.querySelector("#setting-queue-timeout").value),
         poll_interval_seconds: Number(document.querySelector("#setting-queue-poll").value),
         history_retention_days: Number(document.querySelector("#setting-queue-history-days").value),
-        output_retention_days: Number(document.querySelector("#setting-queue-output-days").value),
-        queue_paused: document.querySelector("#setting-queue-paused").checked
+        output_retention_days: Number(document.querySelector("#setting-queue-output-days").value)
       },
       access: {
         admin_qq: document.querySelector("#setting-admin").value.trim(),
@@ -1684,11 +2007,12 @@
         ["missing_reference_reply", "缺少参考图", "不需要占位符"],
         ["missing_role_reply", "角色不存在", "支持 {角色名}"],
         ["group_count_reply", "多人数量超限", "支持 {最少}、{最多}"],
+        ["free_role_count_reply", "自由绘画角色超限", "支持 {最少}、{最多}"],
         ["api_missing_reply", "API 未配置", "不需要占位符"],
         ["api_error_reply", "API 调用失败", "支持 {错误}"],
         ["task_failed_reply", "任务失败", "支持 {任务ID}、{错误}"],
         ["image_rejected_reply", "图片不合规（400/451）", "支持 {任务ID}，接口返回 400 或 451 时使用"],
-        ["completion_reply", "任务完成", "支持 {任务ID}、{剩余次数}"]
+        ["completion_reply", "任务完成", "支持 {任务ID}、{剩余次数}、{用时}（秒，例如 42s）"]
       ]
     },
     {
@@ -1697,7 +2021,8 @@
       source: "guard_replies",
       fields: [
         ["admin_only", "仅管理员", "不需要占位符"],
-        ["quota_exceeded", "次数用完", "支持 {指令}、{重置时间}"]
+        ["quota_exceeded", "次数用完", "支持 {指令}、{重置时间}"],
+        ["group_quota_exceeded", "群里次数用完", "支持 {重置时间}"]
       ]
     }
   ];
@@ -1850,6 +2175,12 @@
     document.querySelector("#api-token").value = config.api_key || "";
     document.querySelector("#api-model").value = config.model || "";
     document.querySelector("#api-size").value = config.size || "auto";
+    document.querySelector("#api-quality").value = config.quality || "auto";
+    document.querySelector("#api-complexity").value = config.complexity || "auto";
+    for (const id of ["api-quality", "api-complexity"]) {
+      const select = document.querySelector(`#${id}`);
+      if (select._combo) refreshSelectCombo(select);
+    }
     document.querySelector("#api-timeout").value = String(config.timeout_seconds || 180);
     document.querySelector("#api-endpoint").textContent = config.endpoint ? `实际请求：${config.endpoint}` : "";
   }
@@ -1874,6 +2205,122 @@
       : "当前没有可用的 API 配置";
   }
 
+  function setApiRouteStatus(message, isError = false) {
+    const status = document.querySelector("#api-route-status");
+    status.textContent = message || "";
+    status.className = isError ? "error" : "";
+  }
+
+  function renderApiRoutes() {
+    const list = document.querySelector("#api-route-list");
+    list.replaceChildren();
+    if (!apiRoutes.length) {
+      list.append(make("div", "placeholder", "还没有指定规则，所有会话使用当前 API。"));
+      return;
+    }
+    apiRoutes.forEach((route, index) => {
+      const row = make("div", "api-route-row");
+      const name = make("input", "maibot-input");
+      name.placeholder = "规则名（可选）";
+      name.maxLength = 80;
+      name.value = route.name || "";
+      const scopeSelect = make("select", "maibot-select");
+      scopeSelect.setAttribute("aria-label", "规则类型");
+      for (const [value, label] of [["group", "群聊"], ["private", "私聊"]]) {
+        const option = make("option", "", label);
+        option.value = value;
+        scopeSelect.append(option);
+      }
+      scopeSelect.value = route.scope;
+      const target = make("input", "maibot-input");
+      target.placeholder = route.scope === "group" ? "群号" : "QQ 号";
+      target.inputMode = "numeric";
+      target.maxLength = 20;
+      target.value = route.target_id;
+      const profileSelect = make("select", "maibot-select");
+      profileSelect.setAttribute("aria-label", "指定 API");
+      for (const profile of apiProfiles) {
+        const option = make("option", "", `${profile.name || "未命名"} — ${profile.model || "未设置模型"}`);
+        option.value = profile.profile_id;
+        profileSelect.append(option);
+      }
+      profileSelect.value = route.profile_id;
+      const remove = make("button", "maibot-button task-delete", "删除");
+      remove.type = "button";
+      name.addEventListener("input", () => {
+        route.name = name.value.trim();
+      });
+      scopeSelect.addEventListener("change", () => {
+        route.scope = scopeSelect.value;
+        target.placeholder = route.scope === "group" ? "群号" : "QQ 号";
+      });
+      target.addEventListener("input", () => {
+        route.target_id = target.value.trim();
+      });
+      profileSelect.addEventListener("change", () => {
+        route.profile_id = profileSelect.value;
+      });
+      remove.addEventListener("click", () => {
+        apiRoutes.splice(index, 1);
+        renderApiRoutes();
+        setApiRouteStatus("规则已移除，点击保存规则生效");
+      });
+      row.append(name, scopeSelect, target, profileSelect, remove);
+      list.append(row);
+      enhanceSelect(scopeSelect);
+      enhanceSelect(profileSelect);
+    });
+  }
+
+  function addApiRoute() {
+    const profileId = apiActiveId || (apiProfiles[0] && apiProfiles[0].profile_id);
+    if (!profileId) {
+      setApiRouteStatus("先配置一套 API，再添加指定规则", true);
+      return;
+    }
+    apiRoutes.push({name: "", scope: "group", target_id: "", profile_id: profileId});
+    renderApiRoutes();
+    setApiRouteStatus("填写群号或 QQ 号后保存");
+  }
+
+  async function saveApiRoutes() {
+    const routes = [];
+    const seen = new Set();
+    for (const route of apiRoutes) {
+      const targetId = String(route.target_id || "").trim();
+      if (!/^\d{5,20}$/.test(targetId)) {
+        setApiRouteStatus("群号或 QQ 号必须是 5-20 位数字", true);
+        return;
+      }
+      if (!route.profile_id) {
+        setApiRouteStatus("每条规则都要选择一个 API", true);
+        return;
+      }
+      const key = `${route.scope}\n${targetId}`;
+      if (seen.has(key)) {
+        setApiRouteStatus("同一个群或 QQ 不能配置两条规则", true);
+        return;
+      }
+      seen.add(key);
+      routes.push({name: String(route.name || "").trim(), scope: route.scope, target_id: targetId, profile_id: route.profile_id});
+    }
+    const button = document.querySelector("#api-route-save");
+    button.disabled = true;
+    try {
+      const result = await request("action", "save_drawing_api_routes", {
+        routes_json: JSON.stringify(routes)
+      });
+      if (result.error) throw new Error(result.error);
+      apiRoutes = result.routes || routes;
+      renderApiRoutes();
+      setApiRouteStatus("指定规则已保存");
+    } catch (error) {
+      setApiRouteStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function loadDrawingApi() {
     if (apiLoaded) return;
     setApiStatus("正在加载 API 配置…");
@@ -1884,10 +2331,12 @@
       closeSizeMenu();
       apiProfiles = Array.isArray(config.profiles) && config.profiles.length ? config.profiles : [config];
       apiActiveId = config.active_id || config.profile_id || apiProfiles[0].profile_id;
+      apiRoutes = Array.isArray(config.routes) ? config.routes : [];
       if (!apiSelectedId || !apiProfiles.some(profile => profile.profile_id === apiSelectedId)) {
         apiSelectedId = apiActiveId;
       }
       renderApiProfiles();
+      renderApiRoutes();
       apiLoaded = true;
       setApiStatus(config.configured ? "" : "尚未配置，绘图指令会提示先配置 API");
     } catch (error) {
@@ -1904,6 +2353,8 @@
       api_key: document.querySelector("#api-token").value.trim(),
       model: document.querySelector("#api-model").value.trim(),
       size: document.querySelector("#api-size").value.trim(),
+      quality: document.querySelector("#api-quality").value,
+      complexity: document.querySelector("#api-complexity").value,
       timeout_seconds: Number(document.querySelector("#api-timeout").value)
     };
     button.disabled = true;
@@ -2110,8 +2561,39 @@
     return details;
   }
 
+  function taskApiJsonDetails(label, response) {
+    const details = make("details", "task-detail-prompt");
+    details.append(make("summary", "", label));
+    const pre = make("pre", "task-detail-value");
+    pre.textContent = JSON.stringify(response, null, 2);
+    details.append(pre);
+    return details;
+  }
+
+  function taskApiAttemptsDetails(attempts) {
+    const details = make("details", "task-detail-prompt");
+    details.append(make("summary", "", `API 尝试记录（${attempts.length} 次）`));
+    attempts.forEach((attempt, index) => {
+      const block = make("div", "task-api-attempt");
+      const title = attempt.status === "succeeded" ? "成功" : "失败";
+      const code = attempt.status_code ? ` HTTP ${attempt.status_code}` : "";
+      block.append(make("div", "task-detail-label", `第 ${index + 1} 次：${title}${code}`));
+      if (attempt.error) block.append(make("div", "task-detail-value error", attempt.error));
+      const pre = make("pre", "task-detail-value");
+      pre.textContent = JSON.stringify(
+        {request: attempt.request || {}, response: attempt.response || {}},
+        null,
+        2
+      );
+      block.append(pre);
+      details.append(block);
+    });
+    return details;
+  }
+
   function taskCard(task, history = false) {
     const card = make("div", "task-card");
+    card.dataset.taskId = String(task.id);
     const previewKind = task.output_available ? "output" : task.reference_available ? "reference" : "";
     const cover = make("div", "task-cover");
     if (previewKind) {
@@ -2122,7 +2604,13 @@
       image.dataset.kind = previewKind;
       cover.append(image);
       cover.append(make("span", "task-cover-badge", previewKind === "output" ? "成品图" : "参考图"));
-      taskThumbnailObserver.observe(image);
+      if (task.thumbnail) {
+        const key = `${task.id}:${previewKind}`;
+        cacheTaskThumbnail(key, task.thumbnail);
+        image.src = task.thumbnail;
+      } else {
+        taskThumbnailObserver.observe(image);
+      }
     } else {
       cover.append(make("div", "task-cover-placeholder", "暂无预览"));
     }
@@ -2220,10 +2708,14 @@
   async function loadCurrentTasks() {
     if (currentTasksLoading) return;
     currentTasksLoading = true;
+    const pauseRevision = queuePauseRevision;
     setTaskStatus("#current-status", "正在加载当前任务…");
     try {
       const result = await request("query", "current_tasks");
       currentTasksData = result.tasks;
+      if (pauseRevision === queuePauseRevision) {
+        document.querySelector("#current-queue-paused").checked = Boolean(result.config && result.config.queue_paused);
+      }
       const paused = result.config && result.config.queue_paused ? " · 队列已暂停" : "";
       setTaskStatus(
         "#current-stats",
@@ -2238,8 +2730,35 @@
     }
   }
 
+  async function toggleQueuePause() {
+    const checkbox = document.querySelector("#current-queue-paused");
+    const desired = checkbox.checked;
+    queuePauseRevision += 1;
+    checkbox.disabled = true;
+    setTaskStatus("#current-status", desired ? "正在暂停领取新任务…" : "正在恢复领取新任务…");
+    try {
+      const result = await request("action", "save_settings", {
+        settings_json: JSON.stringify({task_queue: {queue_paused: desired}})
+      });
+      if (result && result.error) throw new Error(result.error);
+      if (settingsData) settingsData.task_queue.queue_paused = desired;
+      const paused = desired ? " · 队列已暂停" : "";
+      setTaskStatus(
+        "#current-stats",
+        `排队 ${(currentTasksData.filter(task => task.status === "queued")).length} 个 · 执行中 ${(currentTasksData.filter(task => task.status === "running")).length} 个${paused}`
+      );
+      setTaskStatus("#current-status", desired ? "已暂停领取新任务，当前任务会继续完成" : "已恢复领取新任务");
+    } catch (error) {
+      checkbox.checked = !desired;
+      setTaskStatus("#current-status", error.message || String(error), true);
+    } finally {
+      checkbox.disabled = false;
+    }
+  }
+
   async function loadTaskHistory(page = 1) {
     historyPage = Math.max(1, page);
+    const requestId = ++historyRequestId;
     const status = document.querySelector("#history-status-filter").value;
     const query = document.querySelector("#history-query").value.trim();
     setTaskStatus("#history-status", "正在加载任务历史…");
@@ -2250,8 +2769,10 @@
         status,
         query
       });
+      if (requestId !== historyRequestId) return;
       historyPages = result.pages;
       if (historyPage > result.pages) return loadTaskHistory(result.pages);
+      historyTotal = result.total;
       historySelected.clear();
       const list = document.querySelector("#history-list");
       taskThumbnailObserver.disconnect();
@@ -2355,6 +2876,15 @@
       if (referenceBlock) side.append(referenceBlock);
 
       side.append(taskPromptDetails("最终提示词", task.final_prompt));
+      if (task.api_request && Object.keys(task.api_request).length) {
+        side.append(taskApiJsonDetails("API 请求（不含密钥）", task.api_request));
+      }
+      if (task.api_attempts && task.api_attempts.length) {
+        side.append(taskApiAttemptsDetails(task.api_attempts));
+      }
+      if (task.api_response && Object.keys(task.api_response).length) {
+        side.append(taskApiJsonDetails("API 响应（图片 base64 已省略）", task.api_response));
+      }
       if (task.extra_prompt) {
         side.append(taskPromptDetails("额外提示词", task.extra_prompt));
       }
@@ -2426,6 +2956,24 @@
     });
   }
 
+  function removeHistoryTasks(ids) {
+    const wanted = new Set(ids.map(String));
+    const list = document.querySelector("#history-list");
+    let removed = 0;
+    for (const card of [...list.querySelectorAll(".task-card")]) {
+      if (!wanted.has(card.dataset.taskId)) continue;
+      card.remove();
+      removed += 1;
+    }
+    historyTotal = Math.max(0, historyTotal - removed);
+    historyPages = Math.max(1, Math.ceil(historyTotal / 20));
+    historySelected.clear();
+    setTaskStatus("#history-stats", `共 ${historyTotal} 个历史任务`);
+    if (!list.querySelector(".task-card") && historyTotal > 0) {
+      void loadTaskHistory(Math.min(historyPage, historyPages));
+    }
+  }
+
   async function retryTask(taskId) {
     try {
       const apiProfileId = await chooseRetryApi(taskId);
@@ -2436,7 +2984,7 @@
       });
       if (result.error) throw new Error(result.error);
       setTaskStatus("#history-status", `任务 #${result.task_id} 已重新排队`);
-      await loadTaskHistory(historyPage);
+      removeHistoryTasks([result.task_id]);
       await loadCurrentTasks();
     } catch (error) {
       setTaskStatus("#history-status", error.message || String(error), true);
@@ -2449,7 +2997,7 @@
       const result = await request("action", "delete_tasks", {ids_json: JSON.stringify([taskId])});
       if (result.error) throw new Error(result.error);
       setTaskStatus("#history-status", `已删除任务 #${taskId}`);
-      await loadTaskHistory(historyPage);
+      removeHistoryTasks([taskId]);
     } catch (error) {
       setTaskStatus("#history-status", error.message || String(error), true);
     }
@@ -2466,7 +3014,7 @@
       const result = await request("action", "delete_tasks", {ids_json: JSON.stringify(ids)});
       if (result.error) throw new Error(result.error);
       setTaskStatus("#history-status", `已删除 ${result.deleted} 个历史任务`);
-      await loadTaskHistory(historyPage);
+      removeHistoryTasks(ids);
     } catch (error) {
       setTaskStatus("#history-status", error.message || String(error), true);
     }
@@ -2481,19 +3029,23 @@
     const apiProfileId = await chooseRetryApi(ids[0]);
     if (apiProfileId === null) return;
     let succeeded = 0;
+    const retriedIds = [];
     for (const taskId of ids) {
       try {
         const result = await request("action", "retry_task", {
           task_id: taskId,
           api_profile_id: apiProfileId
         });
-        if (!result.error) succeeded += 1;
+        if (!result.error) {
+          succeeded += 1;
+          retriedIds.push(taskId);
+        }
       } catch (_) {
         // 单个任务失败不阻断其余选择。
       }
     }
     setTaskStatus("#history-status", `已重新排队 ${succeeded} / ${ids.length} 个任务`);
-    await loadTaskHistory(historyPage);
+    removeHistoryTasks(retriedIds);
     await loadCurrentTasks();
   }
 
@@ -2503,6 +3055,9 @@
   document.querySelector("#settings-save").addEventListener("click", saveSettings);
   document.querySelector("#user-quota-save").addEventListener("click", () => void saveUserQuota());
   document.querySelector("#user-quota-reset").addEventListener("click", resetUserQuotaForm);
+  document.querySelector("#group-quota-save").addEventListener("click", () => void saveGroupQuotas());
+  document.querySelector("#permission-save").addEventListener("click", () => void savePermission());
+  document.querySelector("#permission-reset").addEventListener("click", resetPermissionForm);
   document.querySelector("#config-export").addEventListener("click", () => void exportConfig());
   document.querySelector("#config-import").addEventListener("click", () => {
     document.querySelector("#config-import-file").click();
@@ -2520,6 +3075,8 @@
   document.querySelector("#api-new").addEventListener("click", newDrawingApi);
   document.querySelector("#api-activate").addEventListener("click", () => void activateDrawingApi());
   document.querySelector("#api-delete").addEventListener("click", () => void deleteDrawingApi());
+  document.querySelector("#api-route-add").addEventListener("click", addApiRoute);
+  document.querySelector("#api-route-save").addEventListener("click", () => void saveApiRoutes());
   document.querySelector("#api-profile-select").addEventListener("change", event => {
     apiSelectedId = event.target.value;
     const profile = apiProfiles.find(item => item.profile_id === apiSelectedId);
@@ -2529,6 +3086,7 @@
     }
   });
   document.querySelector("#current-refresh").addEventListener("click", () => void loadCurrentTasks());
+  document.querySelector("#current-queue-paused").addEventListener("change", () => void toggleQueuePause());
   document.querySelector("#current-prev").addEventListener("click", () => {
     if (currentTasksPage <= 1) return;
     currentTasksPage -= 1;
@@ -2577,6 +3135,7 @@
     const sizeBox = document.querySelector("#api-size").closest(".model-combobox");
     if (modelBox && !modelBox.contains(event.target)) closeModelMenu();
     if (sizeBox && !sizeBox.contains(event.target)) closeSizeMenu();
+    closeAllSelectMenus();
   });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") {
@@ -2588,7 +3147,7 @@
   async function start() {
     try {
       await maibot.ready;
-      for (const id of ["sort", "history-status-filter", "user-quota-command"]) {
+      for (const id of ["sort", "history-status-filter", "user-quota-command", "api-quality", "api-complexity", "permission-command"]) {
         enhanceSelect(document.querySelector(`#${id}`));
       }
       activateModule("settings");

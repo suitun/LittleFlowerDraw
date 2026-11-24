@@ -90,6 +90,26 @@ def _render_cached(cache_dir: Path, data: bytes, kind: str) -> bytes:
     return rendered
 
 
+def render_path_cached(cache_dir: Path, path: Path, kind: str) -> bytes:
+    """按文件路径、修改时间和大小缓存任务图片，避免重复读取原图。"""
+    stat = path.stat()
+    key = f"{path.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{kind}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    cache_path = cache_dir / f"{kind}-{digest}.webp"
+    if cache_path.is_file():
+        return cache_path.read_bytes()
+    data = path.read_bytes()
+    rendered = render_thumbnail(data) if kind == "thumb" else render_preview(data)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    temporary = cache_path.with_name(f"{cache_path.name}.{threading.get_ident()}.tmp")
+    try:
+        temporary.write_bytes(rendered)
+        temporary.replace(cache_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return rendered
+
+
 def _summary_payload(summary: RoleSummary) -> Dict[str, Any]:
     return {
         "name": summary.name,

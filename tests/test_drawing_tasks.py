@@ -167,6 +167,32 @@ class DrawingTaskStoreTests(unittest.TestCase):
         third = make_task(self.store, requester_id="user-a", source_key="message-c")
         self.assertEqual(third.id, second.id + 1)
 
+    def test_success_persists_sanitized_api_response(self) -> None:
+        task = make_task(self.store, requester_id="user-a", source_key="response-message")
+        claimed = self.store.claim_next()
+        assert claimed is not None
+        self.store.set_api_request(
+            task.id,
+            {"method": "POST", "model": "gpt-image-2.6", "image_count": 3},
+        )
+        self.store.append_api_attempt(
+            task.id, {"status": "failed", "status_code": 400, "response": {"error": "bad"}}
+        )
+        self.store.append_api_attempt(
+            task.id, {"status": "succeeded", "status_code": 200, "response": {"usage": {}}}
+        )
+        self.store.succeed(
+            task.id,
+            "output.png",
+            {"usage": {"output_tokens": 42}, "data": [{"b64_json": "<omitted 10 chars>"}]},
+        )
+        record = self.store.get(task.id)
+        assert record is not None
+        self.assertEqual(record.api_request["image_count"], 3)
+        self.assertEqual(len(record.api_attempts), 2)
+        self.assertEqual(record.api_attempts[0]["status"], "failed")
+        self.assertEqual(record.api_response["usage"]["output_tokens"], 42)
+
     def test_admin_can_keep_multiple_active_tasks(self) -> None:
         first = make_task(self.store, requester_id="admin", source_key="admin-a", allow_multiple=True)
         second = make_task(self.store, requester_id="admin", source_key="admin-b", allow_multiple=True)
